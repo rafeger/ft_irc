@@ -1,15 +1,16 @@
 #include "../include/Server.hpp"
 #include "../include/Client.hpp"
 
-int main()
+int main(int argc, char **argv)
 {
-	/*if (argc != 3)
+	if (argc != 3)
 	{
 		std::cout << "Error! Enter the port and the password again!" << std::endl;
 		return (1);
-	}*/
+	}
 	Server serv;
-	std::cout << "--SERVER--" << std::endl;
+	std::cout << "Server initialized on port " << argv[1] << std::endl;
+	std::cout << "     -------------------   " << std::endl;
 	try
 	{
 		struct sigaction sa;
@@ -18,7 +19,7 @@ int main()
 		sa.sa_flags = 0;
 		sigaction(SIGINT, &sa, NULL);
 		sigaction(SIGQUIT, &sa, NULL);
-		serv.initServer();
+		serv.initServer(argv[1], argv[2]);
 	}
 	catch (const std::exception& e)
 	{

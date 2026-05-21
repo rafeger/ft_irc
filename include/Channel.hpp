@@ -16,6 +16,7 @@ class Channel
 		std::string _topic;
 		std::vector<Client*> _clients;
 		std::set<Client*> _operators;
+		std::set<Client*> _invitedClients;
 		bool _inviteOnly;
 		bool _topicRestricted;
 		std::string _password;
@@ -45,7 +46,14 @@ class Channel
 		bool hasPassword() const;
 		void setUserLimit(size_t limit);
 		bool hasUserLimit() const;
+		bool isFull() const;
+		bool isEmpty() const;
+		void inviteClient(Client* client);
+		bool isInvited(Client* client) const;
+		void removeInvite(Client* client);
 		void broadcast(const std::string& msg, Client* client);
+		const std::vector<Client*>& getClients() const;
+		size_t getUserLimit() const;
 };
 
 #endif

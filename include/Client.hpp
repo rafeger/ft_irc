@@ -35,7 +35,10 @@ class Client
 		bool hasNick() const;
 		bool hasUser() const;
 		void appendBuffer(const std::string& data);
+		std::string& getBuffer();
 		const std::string& getBuffer() const;
+		void sendMessage(const std::string& msg);
+		std::string getPrefix() const;
 };
 
 #endif

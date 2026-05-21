@@ -4,11 +4,14 @@
 #include <iostream>
 #include <string>
 #include <cstring>
+#include <sstream>
+#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <csignal>
 #include <map>
 #include <vector>
+#include <cerrno>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -39,7 +42,7 @@ class Server
 		void acceptClient();
 		void removeClient(int fd);
 		void receivedMessage(int fd);
-		void initServer();
+		void initServer(const std::string& port, const std::string& password);
 		void run();
 		Channel* getChannel(const std::string& name);
 		void createChannel(const std::string& name);
@@ -51,6 +54,7 @@ class Server
 		void handleJoin(Client* client, const std::string& channel);
 		void handlePart(Client* client, const std::string& channel);
 		void handlePrivateMsg(Client* client, const std::string& target, const std::string& msg);
+		void tryRegister(Client* client);
 
 		class SocketException : public std::exception
 		{

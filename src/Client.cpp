@@ -1,4 +1,6 @@
 #include "../include/Client.hpp"
+#include "../include/Channel.hpp"
+#include "../include/Server.hpp"
 
 Client::Client() : _clientFd(-1), _IPAddr(""), _passOK(false), _isRegistered(false)
 {}
@@ -41,7 +43,7 @@ bool Client::isRegistered() const
 	return _isRegistered;
 }
 
-void Client::setRegistered() const
+void Client::setRegistered(bool value)
 {
 	_isRegistered = value;
 }
@@ -84,4 +86,20 @@ void Client::appendBuffer(const std::string& data)
 const std::string& Client::getBuffer() const
 {
 	return _buffer;
+}
+
+std::string& Client::getBuffer()
+{
+	return (_buffer);
+}
+
+void Client::sendMessage(const std::string& msg)
+{
+	std::string message = msg + "\r\n";
+	send(_clientFd, message.c_str(), message.size(), 0);
+}
+
+std::string Client::getPrefix() const
+{
+	return (_nickname + "!" + _username +"@" + _IPAddr);
 }
