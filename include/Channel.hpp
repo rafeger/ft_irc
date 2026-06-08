@@ -44,8 +44,11 @@ class Channel
 		void setPassword(const std::string& password);
 		bool checkPassword(const std::string& password) const;
 		bool hasPassword() const;
+		void removePassword();
 		void setUserLimit(size_t limit);
 		bool hasUserLimit() const;
+		void removeUserLimit();
+		std::string getModes() const;
 		bool isFull() const;
 		bool isEmpty() const;
 		void inviteClient(Client* client);

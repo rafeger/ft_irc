@@ -111,6 +111,12 @@ bool Channel::hasPassword() const
 	return (_hasPassword);
 }
 
+void Channel::removePassword()
+{
+	_password.clear();
+	_hasPassword = false;
+}
+
 void Channel::setUserLimit(size_t limit)
 {
 	_userLimit = limit;
@@ -120,6 +126,38 @@ void Channel::setUserLimit(size_t limit)
 bool Channel::hasUserLimit() const
 {
 	return (_hasUserLimit);
+}
+
+void Channel::removeUserLimit()
+{
+	_userLimit = 0;
+	_hasUserLimit = false;
+}
+
+std::string Channel::getModes() const
+{
+	std::string mode = "+";
+	std::string param;
+
+	if (_inviteOnly)
+		mode += "i";
+	if (_topicRestricted)
+		mode += "t";
+	if (_hasPassword)
+	{
+		mode += "k";
+		param += " " + _password;
+	}
+	if (_hasUserLimit)
+	{
+		mode += "l";
+		std::ostringstream oss;
+		oss << _userLimit;
+		param += " " + oss.str();
+	}
+	if (mode == "+")
+		return (mode);
+	return (mode + param);
 }
 
 bool Channel::isFull() const
