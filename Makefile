@@ -1,6 +1,6 @@
 CC = c++
 CFLAGS = -Wall -Wextra -Werror -std=c++98
-SRC = src/main.cpp src/Client.cpp src/Server.cpp src/Channel.cpp
+SRC = src/main.cpp src/Client.cpp src/Server.cpp src/Channel.cpp src/Utils.cpp src/CommandHandler.cpp
 
 OBJ = $(SRC:.cpp=.o)
 

@@ -1,0 +1,288 @@
+#include "../include/CommandHandler.hpp"
+#include "../include/Server.hpp"
+#include "../include/Client.hpp"
+#include "../include/Channel.hpp"
+#include "../include/IRCConstants.hpp"
+#include "../include/Utils.hpp"
+#include <cctype>
+#include <set>
+
+// ================================================================
+// PERSON A — Connection lifecycle
+// ================================================================
+
+// Index-based parser — handles ":prefix CMD p1 p2 :trailing text"
+// We strip a leading ':' prefix (server-to-server) if present.
+std::vector<std::string> CommandHandler::parseCommand(const std::string& line)
+{
+	std::vector<std::string> tokens;
+	size_t i = 0;
+	const size_t len = line.size();
+
+	// Skip a leading ':server' prefix (rare in client→server, but be safe)
+	if (len > 0 && line[0] == ':')
+	{
+		while (i < len && line[i] != ' ')
+			++i;
+	}
+
+	while (i < len)
+	{
+		while (i < len && line[i] == ' ')
+			++i;
+		if (i >= len)
+			break;
+		if (line[i] == ':')
+		{
+			tokens.push_back(line.substr(i + 1));
+			break;
+		}
+		size_t start = i;
+		while (i < len && line[i] != ' ')
+			++i;
+		tokens.push_back(line.substr(start, i - start));
+	}
+	return tokens;
+}
+
+void CommandHandler::handle(Server* server, Client* client, const std::string& line)
+{
+	std::vector<std::string> tokens = parseCommand(line);
+	if (tokens.empty())
+		return;
+
+	std::string cmd = tokens[0];
+	for (size_t i = 0; i < cmd.size(); ++i)
+		cmd[i] = static_cast<char>(std::toupper((unsigned char)cmd[i]));
+
+	std::vector<std::string> params(tokens.begin() + 1, tokens.end());
+
+	// Modern IRC clients send CAP negotiation before PASS — ignore silently
+	if (cmd == "CAP" || cmd == "PONG")
+		return;
+
+	// Phase 0 — no PASS yet: only PASS and QUIT are accepted
+	if (!client->isPassOK())
+	{
+		if (cmd == "PASS")
+			handlePass(server, client, params);
+		else if (cmd == "QUIT")
+			handleQuit(server, client, params);
+		else
+			client->sendReply(ERR_NOTREGISTERED, ":You have not registered");
+		return;
+	}
+
+	// Phase 1 — authenticated but NICK/USER not yet complete
+	if (!client->isRegistered())
+	{
+		if (cmd == "NICK")
+			handleNick(server, client, params);
+		else if (cmd == "USER")
+			handleUser(server, client, params);
+		else if (cmd == "QUIT")
+			handleQuit(server, client, params);
+		else if (cmd == "PASS")
+			client->sendReply(ERR_ALREADYREGISTRED, ":You may not reregister");
+		else
+			client->sendReply(ERR_NOTREGISTERED, ":You have not registered");
+		return;
+	}
+
+	// Phase 2 — fully registered: use static dispatch map
+	static std::map<std::string, HandlerFunc> handlers;
+	static bool initialized = false;
+	if (!initialized)
+	{
+		handlers["NICK"]    = &handleNick;
+		handlers["USER"]    = &handleUser;
+		handlers["PASS"]    = &handlePass;
+		handlers["JOIN"]    = &handleJoin;
+		handlers["PRIVMSG"] = &handlePrivmsg;
+		handlers["NOTICE"]  = &handlePrivmsg;
+		handlers["PART"]    = &handlePart;
+		handlers["KICK"]    = &handleKick;
+		handlers["INVITE"]  = &handleInvite;
+		handlers["TOPIC"]   = &handleTopic;
+		handlers["MODE"]    = &handleMode;
+		handlers["QUIT"]    = &handleQuit;
+		handlers["PING"]    = &handlePing;
+		initialized = true;
+	}
+
+	std::map<std::string, HandlerFunc>::iterator it = handlers.find(cmd);
+	if (it != handlers.end())
+		it->second(server, client, params);
+	else
+		client->sendReply("421", cmd + " :Unknown command");
+}
+
+// ----------------------------------------------------------------
+
+void CommandHandler::handlePass(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{
+	if (client->isPassOK())
+	{
+		client->sendReply(ERR_ALREADYREGISTRED, ":You may not reregister");
+		return;
+	}
+	if (params.empty())
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, "PASS :Not enough parameters");
+		return;
+	}
+	if (params[0] != server->getPassword())
+	{
+		client->sendReply(ERR_PASSWDMISMATCH, ":Password incorrect");
+		// Disconnect immediately — prevents the infinite retry loop
+		server->removeClient(client->getFd(), "Bad password");
+		return;
+	}
+	client->setPassOK(true);
+}
+
+void CommandHandler::handleNick(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{
+	if (params.empty())
+	{
+		client->sendReply("431", ":No nickname given");
+		return;
+	}
+	const std::string& newNick = params[0];
+
+	if (!Utils::isValidNickname(newNick))
+	{
+		client->sendReply(ERR_ERRONEUSNICKNAME, newNick + " :Erroneous nickname");
+		return;
+	}
+
+	Client* conflict = server->getClientByNickname(newNick);
+	if (conflict && conflict != client)
+	{
+		client->sendReply(ERR_NICKNAMEINUSE, newNick + " :Nickname is already in use");
+		return;
+	}
+
+	std::string oldPrefix = client->getPrefix();
+	client->setNickname(newNick);
+
+	if (client->isRegistered())
+	{
+		// Notify the changing client + every unique member of their shared channels
+		std::string msg = ":" + oldPrefix + " NICK :" + newNick;
+		client->sendMessage(msg);
+
+		std::set<Client*> notified;
+		notified.insert(client);
+		const std::vector<Channel*>& chans = client->getChannels();
+		for (size_t i = 0; i < chans.size(); ++i)
+		{
+			const std::vector<Client*>& members = chans[i]->getClients();
+			for (size_t j = 0; j < members.size(); ++j)
+			{
+				if (notified.find(members[j]) == notified.end())
+				{
+					members[j]->sendMessage(msg);
+					notified.insert(members[j]);
+				}
+			}
+		}
+	}
+	else
+		tryRegister(client);
+}
+
+void CommandHandler::handleUser(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{
+	(void)server;
+	if (client->isRegistered())
+	{
+		client->sendReply(ERR_ALREADYREGISTRED, ":You may not reregister");
+		return;
+	}
+	// USER <username> <hostname> <servername> :<realname>
+	if (params.size() < 4)
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, "USER :Not enough parameters");
+		return;
+	}
+	client->setUsername(params[0]);
+	// params[1] and [2] are hostname/servername — we ignore them (we use the real socket address)
+	client->setRealname(params[3]);
+	tryRegister(client);
+}
+
+void CommandHandler::tryRegister(Client* client)
+{
+	if (!client->isPassOK() || !client->hasNick() || !client->hasUser())
+		return;
+	if (client->isRegistered())
+		return;
+	client->setRegistered(true);
+	sendWelcomeMessages(client);
+}
+
+void CommandHandler::sendWelcomeMessages(Client* client)
+{
+	const std::string& nick = client->getNickname();
+	client->sendReply(RPL_WELCOME,  ":Welcome to the IRC Network " + nick);
+	client->sendReply(RPL_YOURHOST, ":Your host is localhost, running version 1.0");
+	client->sendReply(RPL_CREATED,  ":This server was created today");
+	client->sendReply(RPL_MYINFO,   "localhost 1.0 o itklno");
+}
+
+void CommandHandler::handlePing(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{
+	(void)server;
+	if (params.empty())
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, "PING :Not enough parameters");
+		return;
+	}
+	client->sendMessage("PONG localhost :" + params[0]);
+}
+
+// Hands the reason to removeClient — server broadcasts QUIT and cleans up.
+// Do NOT touch client after this call; the pointer is invalid.
+void CommandHandler::handleQuit(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{
+	std::string reason = params.empty() ? "Client quit" : params[0];
+	server->removeClient(client->getFd(), reason);
+}
+
+// ================================================================
+// PERSON B — Channel commands (stubs — to be filled in)
+// ================================================================
+
+void CommandHandler::handleJoin(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{ (void)server; (void)client; (void)params; }
+
+void CommandHandler::handlePart(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{ (void)server; (void)client; (void)params; }
+
+void CommandHandler::handlePrivmsg(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{ (void)server; (void)client; (void)params; }
+
+void CommandHandler::handleKick(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{ (void)server; (void)client; (void)params; }
+
+void CommandHandler::handleInvite(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{ (void)server; (void)client; (void)params; }
+
+void CommandHandler::handleTopic(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{ (void)server; (void)client; (void)params; }
+
+void CommandHandler::handleMode(Server* server, Client* client,
+	const std::vector<std::string>& params)
+{ (void)server; (void)client; (void)params; }

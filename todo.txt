@@ -29,7 +29,7 @@ DAY 1-A  Server cleanup + Makefile
 ─────────────────────────────────────────
 
 Makefile
-  [ ] Add Utils.cpp and CommandHandler.cpp to SRC
+  [x] Add Utils.cpp and CommandHandler.cpp to SRC
 
 Server.hpp / Server.cpp
   [ ] Remove all handleXxx method declarations from Server.hpp — they move to CommandHandler
@@ -66,7 +66,7 @@ CommandHandler.cpp — TOP SECTION (Person A)
   [ ] tryRegister() — if passOK + hasNick + hasUser + not yet registered → register + welcome
   [ ] sendWelcomeMessages() — 001, 002, 003, 004 in order
   [ ] handlePing()  — sendMessage("PONG localhost :" + params[0])
-  [ ] handleQuit()  — broadcast QUIT to client's channels, then server->removeClient()
+  [x] handleQuit()  — broadcast QUIT to client's channels, then server->removeClient()
 
 TEST GOAL — end of Day 1:
   irssi connects → 001-004 appear → /nick and /join work → /quit is clean

@@ -1,6 +1,7 @@
 #include "../include/Server.hpp"
 #include "../include/Client.hpp"
 #include "../include/Channel.hpp"
+#include "../include/CommandHandler.hpp"
 
 Server::Server()
 {
@@ -76,7 +77,8 @@ void Server::acceptClient()
 	{
 		if (errno != EAGAIN && errno != EWOULDBLOCK)
 			throw Server::AcceptException();
-		return ;
+		delete cl;
+		return;
 	}
 	if (fcntl(accClient, F_SETFL, O_NONBLOCK) == -1)
 		throw Server::FcntlException();
@@ -90,32 +92,41 @@ void Server::acceptClient()
 	std::cout << "Client " << accClient << " connected" << std::endl;
 }
 
-void Server::removeClient(int fd)
+// Broadcasts QUIT to all of the client's channels, then removes and deletes them.
+void Server::removeClient(int fd, const std::string& reason)
 {
 	std::map<int, Client*>::iterator it = _clients.find(fd);
 	if (it == _clients.end())
-		return ;
+		return;
 	Client* client = it->second;
-	for (std::map<std::string, Channel*>::iterator ch = _channels.begin(); ch != _channels.end();)
+
+	std::string quitMsg = ":" + client->getPrefix() + " QUIT :" + reason;
+	std::vector<Channel*> clientChans = client->getChannels(); // copy — removeClient modifies original
+	for (size_t i = 0; i < clientChans.size(); ++i)
 	{
-		ch->second->removeClient(client);
-		if (ch->second->isEmpty())
+		clientChans[i]->broadcast(quitMsg, client);
+		clientChans[i]->removeClient(client);
+		if (clientChans[i]->isEmpty())
 		{
-			delete ch->second;
-			_channels.erase(ch);
+			std::string chanName = clientChans[i]->getName();
+			removeChannel(chanName);
 		}
-		else
-			++ch;
 	}
+
+	// RFC 1459: server sends ERROR before closing — irssi waits for this
+	std::string errMsg = ":localhost ERROR :Closing Link: " + client->getPrefix() + " (" + reason + ")\r\n";
+	send(fd, errMsg.c_str(), errMsg.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
+
+	std::cout << "Client " << fd << " disconnected (" << reason << ")" << std::endl;
 	close(fd);
 	delete client;
 	_clients.erase(it);
-	for (size_t i = 0; i < _pollfds.size(); i++)
+	for (size_t i = 0; i < _pollfds.size(); ++i)
 	{
 		if (_pollfds[i].fd == fd)
 		{
 			_pollfds.erase(_pollfds.begin() + i);
-			break ;
+			break;
 		}
 	}
 }
@@ -128,26 +139,36 @@ void Server::receivedMessage(int fd)
 	if (bytes == 0)
 	{
 		std::cout << "Client " << fd << " disconnected" << std::endl;
-		removeClient(fd);
-		return ;
+		removeClient(fd, "Connection closed");
+		return;
 	}
-	else if (bytes < 0)
+	if (bytes < 0)
 	{
 		if (errno != EAGAIN && errno != EWOULDBLOCK)
-			removeClient(fd);
-		return ;
+			removeClient(fd, "Read error");
+		return;
 	}
 	buffer[bytes] = '\0';
-	Client* client = _clients[fd];
+
+	std::map<int, Client*>::iterator it = _clients.find(fd);
+	if (it == _clients.end())
+		return;
+	Client* client = it->second;
 	client->appendBuffer(buffer);
-	std::cout << "Client " << fd << " Data: " << buffer;
-	std::string& buf = client->getBuffer();
+
+	// Split on '\n' — strips trailing '\r' to handle both "\r\n" and bare "\n"
+	std::string& recvBuf = client->getBuffer();
 	size_t pos;
-	while ((pos = buf.find("\r\n")) != std::string::npos)
+	while ((pos = recvBuf.find('\n')) != std::string::npos)
 	{
-		std::string line = buf.substr(0, pos);
-		buf.erase(0, pos + 2);
-		handleCmd(client, line);
+		std::string line = recvBuf.substr(0, pos);
+		recvBuf.erase(0, pos + 1);
+		if (!line.empty() && line[line.size() - 1] == '\r')
+			line.resize(line.size() - 1);
+		CommandHandler::handle(this, client, line);
+		// Client may have been removed inside the handler (QUIT, bad password)
+		if (_clients.find(fd) == _clients.end())
+			return;
 	}
 }
 
@@ -156,161 +177,68 @@ void Server::initServer(const std::string& port, const std::string& password)
 	this->_port = atoi(port.c_str());
 	this->_password = password;
 
+	signal(SIGPIPE, SIG_IGN);
 	createServerSocket();
-	std::cout << "Server " << _serverSocket << " connected" << std::endl;
+	std::cout << "Server listening on port " << _port << std::endl;
 
 	while (_signal == false)
 	{
 		if ((poll(&_pollfds[0], _pollfds.size(), -1) == -1) && _signal == false)
 			throw Server::PollException();
+
 		for (int i = static_cast<int>(_pollfds.size()) - 1; i >= 0; --i)
 		{
-			if (_pollfds[i].revents & (POLLHUP | POLLERR | POLLNVAL))
-			{
-				removeClient(_pollfds[i].fd);
-				continue ;
-			}
+			bool isServerFd = (_pollfds[i].fd == _serverSocket);
+			int  fd         = _pollfds[i].fd;
+
+			// POLLIN first: read any pending data before acting on hangup.
+			// irssi sends QUIT then closes immediately, so both POLLIN and
+			// POLLHUP can be set in the same poll() — we must process the
+			// data first or the QUIT message is silently discarded.
 			if (_pollfds[i].revents & POLLIN)
 			{
-				if (_pollfds[i].fd == _serverSocket)
+				if (isServerFd)
 					acceptClient();
 				else
-					receivedMessage(_pollfds[i].fd);
+					receivedMessage(fd);
 			}
+
+			// Error / hangup — only after we have drained the read buffer
+			if (_pollfds[i].revents & (POLLHUP | POLLERR | POLLNVAL))
+			{
+				if (!isServerFd && _clients.find(fd) != _clients.end())
+					removeClient(fd, "Connection error");
+				continue;
+			}
+
+			if (!isServerFd)
+			{
+				// receivedMessage may have removed this client (QUIT, bad password)
+				std::map<int, Client*>::iterator cit = _clients.find(fd);
+				if (cit == _clients.end())
+					continue;
+
+				if (_pollfds[i].revents & POLLOUT)
+					cit->second->trySend();
+
+				// Keep POLLOUT set only while there is data waiting to go out
+				if (cit->second->hasPendingData())
+					_pollfds[i].events |= POLLOUT;
+				else
+					_pollfds[i].events &= ~POLLOUT;
+			}
+
 			_pollfds[i].revents = 0;
 		}
 	}
-}
-
-void Server::handleJoin(Client *client, const std::string& channel)
-{
-	if (!client)
-		return ;
-	if (channel.empty() || channel[0] != '#')
-	{
-		client->sendMessage("403 " + channel + " :No such channel");
-		return ;
-	}
-	Channel* chan = getChannel(channel);
-	if (!chan)
-	{
-		createChannel(channel);
-		chan = getChannel(channel);
-	}
-	if (chan->isInviteOnly() && !chan->isInvited(client))
-	{
-		client->sendMessage("473 " + channel + " :Cannot join channel (+i)");
-		return ;
-	}
-	if (chan->isFull())
-	{
-		client->sendMessage("471 " + channel + " :Cannot join channel (+l)");
-		return ;
-	}
-	if (chan->hasClient(client))
-		return ;
-	chan->addClient(client);
-	std::string msg = ":" + client->getPrefix() + " JOIN " + channel;
-	chan->broadcast(msg, NULL);
-	client->sendMessage(msg);
-	if (!chan->getTopic().empty())
-		client->sendMessage("332 " + client->getNickname() + " " + channel + " :" + chan->getTopic());
-	else
-		client->sendMessage("331 " + client->getNickname() + " " + channel + ":No topic is set");
-}
-
-void Server::handlePass(Client *client, const std::string& password)
-{
-	if (!client)
-		return ;
-	if (client->isRegistered())
-	{
-		client->sendMessage("462 :You may not register");
-		return ;
-	}
-	if (password != _password)
-	{
-		client->sendMessage("464 :Password incorrect");
-		removeClient(client->getFd());
-		return ;
-	}
-	client->setPassOK(true);
-}
-
-void Server::handleNick(Client* client, const std::string& nickname)
-{
-	if (!client)
-		return ;
-	if (nickname.empty())
-	{
-		client->sendMessage("431 :No nickname given");
-		return ;
-	}
-	if (client->getNickname() == nickname)
-	{
-		client->sendMessage("433 " + nickname + " :Nickname is already in use");
-		return ;
-	}
-	for (std::map<int, Client*>::iterator it = _clients.begin(); it != _clients.end(); ++it)
-	{
-		if (it->second->getNickname() == nickname)
-		{
-			client->sendMessage("433 " + nickname + " :Nickname is already in use");
-			return ;
-		}
-	}
-	bool wasRegistered = client->isRegistered();
-	std::string oldNickname = client->getNickname();
-	client->setNickname(nickname);
-	tryRegister(client);
-	if (wasRegistered)
-	{
-		std::string msg = ":" + oldNickname + " NICK :" + nickname + "\r\n";
-		for (std::map<std::string, Channel*>::iterator it = _channels.begin(); it != _channels.end(); ++it)
-		{
-			if (it->second->hasClient(client))
-				it->second->broadcast(msg, NULL);
-		}
-		client->sendMessage(msg);
-	}
-}
-
-void Server::handleUser(Client* client, const std::string& username)
-{
-	if (!client)
-		return ;
-	if (client->isRegistered())
-	{
-		client->sendMessage("462 :You may not register");
-		return ;
-	}
-	if (username.empty())
-	{
-		client->sendMessage("461 USER :Not enough parameters");
-		return ;
-	}
-	client->setUsername(username);
-	tryRegister(client);
-}
-
-void Server::tryRegister(Client* client)
-{
-	if (!client->isPassOK())
-		return ;
-	if (!client->hasNick() || !client->hasUser())
-		return ;
-	if (client->isRegistered())
-		return ;
-	client->setRegistered(true);
-	client->sendMessage("001 :Welcome to the IRC Server");
 }
 
 Channel* Server::getChannel(const std::string& name)
 {
 	std::map<std::string, Channel*>::iterator it = _channels.find(name);
 	if (it != _channels.end())
-		return (it->second);
-	return (NULL);
+		return it->second;
+	return NULL;
 }
 
 void Server::createChannel(const std::string& name)
@@ -328,27 +256,12 @@ void Server::removeChannel(const std::string& name)
 	}
 }
 
-void Server::handleCmd(Client* client, const std::string& msg)
+Client* Server::getClientByNickname(const std::string& nickname)
 {
-	std::istringstream iss(msg);
-	std::string cmd, arg;
-
-	iss >> cmd >> arg;
-
-	if (cmd == "PASS")
-		handlePass(client, arg);
-	else if (cmd == "USER")
+	for (std::map<int, Client*>::iterator it = _clients.begin(); it != _clients.end(); ++it)
 	{
-		std::string username = arg;
-		handleUser(client, username);
+		if (it->second->getNickname() == nickname)
+			return it->second;
 	}
-	else if (cmd == "JOIN")
-	{
-		if (!client->isRegistered())
-		{
-			client->sendMessage("451 :You have not registered");
-			return ;
-		}
-		handleJoin(client, arg);
-	}
+	return NULL;
 }
