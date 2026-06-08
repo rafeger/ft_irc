@@ -141,7 +141,7 @@ void Channel::inviteClient(Client* client)
 
 bool Channel::isInvited(Client* client) const
 {
-	return (_operators.find(client) != _operators.end());
+	return (_invitedClients.find(client) != _invitedClients.end());
 }
 
 void Channel::removeInvite(Client* client)

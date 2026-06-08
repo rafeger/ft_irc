@@ -2,6 +2,8 @@
 #include <cctype>
 #include <sstream>
 
+//
+
 namespace Utils
 {
 	// RFC 1459: nick = letter *8( letter / digit / "-" / "_" ), max 9 chars

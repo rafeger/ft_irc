@@ -1,203 +1,189 @@
 ================================================================================
-  ft_irc — 4-DAY TODO
+  ft_irc — 4-DAY TODO  (2-person split)
 ================================================================================
 
-TARGET FILE STRUCTURE (like friend's project)
-  include/
-    IRCConstants.hpp   — all numeric reply codes as #defines
-    Utils.hpp          — isValidNickname(), split()
-    Client.hpp         — fd, nick, user, hostname, realname, send buffer
-    Channel.hpp        — members, operators, invited, modes
-    CommandHandler.hpp — static dispatch map + one free function per IRC command
-    Server.hpp         — networking + poll loop only
-  src/
-    main.cpp
-    Utils.cpp
-    Client.cpp
-    Channel.cpp
-    CommandHandler.cpp
-    Server.cpp
+DONE (shared baseline — both persons start from here)
+  [x] IRCConstants.hpp  — all numeric reply codes
+  [x] Utils.hpp/cpp     — isValidNickname(), split()
+  [x] Client.hpp/cpp    — send buffer, sendReply(), channel tracking, trySend()
+
+FILE OWNERSHIP RULES
+  Person A owns: Server.hpp, Server.cpp, Makefile,
+                 CommandHandler.hpp, CommandHandler.cpp (top section)
+  Person B owns: Channel.hpp, Channel.cpp,
+                 CommandHandler.cpp (bottom section), README.md
+  ─────────────────────────────────────────────────────────────────────────────
+  CommandHandler.cpp is split into two sections by a clear comment barrier.
+  Person A writes the top section first. Person B appends to the bottom.
+  They never edit the same lines.
+  ─────────────────────────────────────────────────────────────────────────────
 
 Legend: [ ] to do   [x] done   [!] bug fix
 
-────────────────────────────────────────────────────────────────────────────────
-DAY 1 — Foundations: fix bugs, set up clean structure, auth flow
-────────────────────────────────────────────────────────────────────────────────
+================================================================================
+  PERSON A — Infrastructure: Server + CommandHandler skeleton + auth commands
+================================================================================
 
-IRCConstants.hpp (new file)
-  [x] Create include/IRCConstants.hpp with all numeric codes:
-      RPL_WELCOME(001), RPL_YOURHOST(002), RPL_CREATED(003), RPL_MYINFO(004)
-      RPL_UMODEIS(221), RPL_CHANNELMODEIS(324), RPL_NOTOPIC(331), RPL_TOPIC(332)
-      RPL_INVITING(341), RPL_NAMREPLY(353), RPL_ENDOFNAMES(366)
-      ERR_NOSUCHNICK(401), ERR_NOSUCHCHANNEL(403), ERR_CANNOTSENDTOCHAN(404)
-      ERR_ERRONEUSNICKNAME(432), ERR_NICKNAMEINUSE(433)
-      ERR_USERNOTINCHANNEL(441), ERR_NOTONCHANNEL(442), ERR_USERONCHANNEL(443)
-      ERR_NOTREGISTERED(451), ERR_NEEDMOREPARAMS(461), ERR_ALREADYREGISTRED(462)
-      ERR_PASSWDMISMATCH(464), ERR_CHANNELISFULL(471), ERR_INVITEONLYCHAN(473)
-      ERR_BADCHANNELKEY(475), ERR_CHANOPRIVSNEEDED(482)
-
-
-Client.hpp / Client.cpp (extend existing)
-  [x] Add _realname field + setRealname() / getRealname()
-  [x] Add _sendBuffer field + trySend() for non-blocking sends via POLLOUT
-      sendMessage() appends to _sendBuffer; trySend() flushes it when POLLOUT fires
-  [x] Add _hostname field (already resolved in your friend's Client, missing here)
-  [x] Add sendReply(code, message) helper — formats ":localhost <code> <nick> <msg>"
-  [x] Add joinChannel(Channel*) / leaveChannel(Channel*) — client tracks its channels
-      (makes QUIT/disconnect easier: enumerate client's channels without scanning all)
-
-Channel.cpp (bug fixes only today)
-  [!] isInvited() checks _operators instead of _invitedClients — fix the set lookup
-
-CommandHandler.hpp / CommandHandler.cpp (new files — move all handleXxx out of Server)
-  [ ] Single public entry point:
-        static void handle(Server*, Client*, const std::string& line)
-  [ ] parseCommand(line) — tokenizes, handles the trailing ':' parameter
-  [ ] Static dispatch map initialized once inside handle() with a bool guard:
-        typedef void (*HandlerFunc)(Server*, Client*, const std::vector<std::string>&);
-        static std::map<std::string, HandlerFunc> handlers;
-        static bool initialized = false;
-        if (!initialized) { handlers["PASS"] = &handlePass; ... initialized = true; }
-      Dispatch: find cmd in map → call it; if not found → ERR_UNKNOWNCOMMAND
-      Registration guard: before checking the map, reject unregistered clients
-        except for PASS / NICK / USER / CAP / QUIT
-  [ ] Free functions (not class methods) inside CommandHandler.cpp, e.g.:
-        static void handlePass(Server*, Client*, const std::vector<std::string>&);
-  [ ] handlePass()  — check password, setPassOK(); ERR_PASSWDMISMATCH on failure
-  [ ] handleNick()  — validate with Utils::isValidNickname(), check uniqueness,
-                      broadcast nick change to shared channels if already registered
-  [!] handleUser()  — parse all 4 fields (USER <user> <host> <server> :<realname>)
-  [ ] handlePing()  — reply PONG localhost :<token>
-  [ ] handleQuit()  — broadcast QUIT to all client's channels, then server->removeClient()
-  [ ] sendWelcomeMessages() — sends 001, 002, 003, 004 on registration
-
-Server.hpp / Server.cpp (slim down — networking only)
-  [!] Remove all handleXxx methods from Server — they move to CommandHandler
-  [ ] receivedMessage() calls CommandHandler::handleCommand() instead
-  [!] Fix double \n handling — search for both "\r\n" and bare "\n" in buffer loop
-  [ ] Wire POLLOUT: when client->hasPendingData(), set POLLOUT; call client->trySend()
-  [ ] In main() or start(): signal(SIGPIPE, SIG_IGN) to avoid crash on broken socket
+─────────────────────────────────────────
+DAY 1-A  Server cleanup + Makefile
+─────────────────────────────────────────
 
 Makefile
   [ ] Add Utils.cpp and CommandHandler.cpp to SRC
 
-TEST GOAL — end of day 1:
-  Connect with irssi → welcome 001-004 appears → /nick and /join #test work → /quit clean
+Server.hpp / Server.cpp
+  [ ] Remove all handleXxx method declarations from Server.hpp — they move to CommandHandler
+  [ ] Remove all handleXxx method bodies from Server.cpp
+  [ ] receivedMessage() calls CommandHandler::handle() instead of inline logic
+  [ ] Fix line ending handling — search for "\r\n" first, then bare "\n" as fallback
+  [ ] Wire POLLOUT: set POLLOUT flag when client->hasPendingData(); call client->trySend()
+  [ ] Add signal(SIGPIPE, SIG_IGN) in main() to avoid crash on broken socket
 
-────────────────────────────────────────────────────────────────────────────────
-DAY 2 — CommandHandler: JOIN, PRIVMSG, PART, KICK
-────────────────────────────────────────────────────────────────────────────────
+─────────────────────────────────────────
+DAY 1-A  CommandHandler — skeleton + auth
+─────────────────────────────────────────
 
-CommandHandler.cpp — handleJoin()
-  [!] Fix double-send: broadcast(msg, NULL) already includes the joining client;
-      remove the extra client->sendMessage(msg) line
-  [!] Parse the channel key from JOIN params ("JOIN #chan mykey" — second token)
-  [!] Check channel password: send ERR_BADCHANNELKEY(475) on mismatch
-  [ ] Send ERR_INVITEONLYCHAN(473) if +i and client not invited
-  [ ] Send ERR_CHANNELISFULL(471) if +l reached
-  [ ] Remove invite after successful join (invite is one-time)
-  [ ] Send NAMES list after join: RPL_NAMREPLY(353) + RPL_ENDOFNAMES(366)
-      Prefix operators with '@' in the names list
+CommandHandler.hpp (new file)
+  [ ] Forward declare Server, Client
+  [ ] One public entry point: static void handle(Server*, Client*, const std::string& line)
+  [ ] Declare all handler free-functions as private static members
+      (declare ALL of them, even the ones Person B implements — so .hpp is complete upfront)
 
-CommandHandler.cpp — handlePrivmsg()
+CommandHandler.cpp — TOP SECTION (Person A)
+  [ ] parseCommand(line) — tokenize, handle trailing ':' param correctly
+  [ ] handle() — dispatch map initialized once with static bool guard:
+        typedef void (*HandlerFunc)(Server*, Client*, const std::vector<std::string>&);
+        static std::map<std::string, HandlerFunc> handlers;
+        static bool initialized = false;
+        if (!initialized) { populate all entries; initialized = true; }
+      Registration guard: reject unregistered clients except PASS/NICK/USER/CAP/PONG/QUIT
+      Dispatch: map.find(cmd) → call handler; else sendReply 421 unknown command
+  [ ] handlePass()  — check password, setPassOK(); disconnect + ERR_PASSWDMISMATCH on failure
+  [ ] handleNick()  — Utils::isValidNickname(), uniqueness check,
+                      if already registered broadcast ":old!u@h NICK :new" to shared channels
+  [ ] handleUser()  — parse all 4 fields: USER <user> <host> <server> :<realname>
+                      setUsername(), setRealname(); call tryRegister()
+  [ ] tryRegister() — if passOK + hasNick + hasUser + not yet registered → register + welcome
+  [ ] sendWelcomeMessages() — 001, 002, 003, 004 in order
+  [ ] handlePing()  — sendMessage("PONG localhost :" + params[0])
+  [ ] handleQuit()  — broadcast QUIT to client's channels, then server->removeClient()
+
+TEST GOAL — end of Day 1:
+  irssi connects → 001-004 appear → /nick and /join work → /quit is clean
+
+================================================================================
+  PERSON B — Channel layer + channel commands
+================================================================================
+
+─────────────────────────────────────────
+DAY 1-B  Channel bug fix + additions
+─────────────────────────────────────────
+
+Channel.cpp — bug fix
+  [!] isInvited(): fix set lookup — checks _operators instead of _invitedClients
+      Fix: return (_invitedClients.find(client) != _invitedClients.end());
+
+Channel.hpp / Channel.cpp — additions needed for MODE (do this before handleMode)
+  [ ] getModes()        — build mode string: "+itk <key>" or "+l <n>" etc.
+  [ ] removePassword()  — clear _password and set _hasPassword = false
+  [ ] removeUserLimit() — clear _userLimit and set _hasUserLimit = false
+
+─────────────────────────────────────────
+DAY 2-B  Channel commands
+─────────────────────────────────────────
+
+CommandHandler.cpp — BOTTOM SECTION (Person B appends after Person A's section)
+
+  handleJoin()
+  [ ] Parse channel list and key list (split on ',')
+  [ ] Create channel if it doesn't exist; first joiner becomes operator
+  [ ] Check password → ERR_BADCHANNELKEY(475)
+  [ ] Check invite-only → ERR_INVITEONLYCHAN(473)
+  [ ] Check user limit → ERR_CHANNELISFULL(471)
+  [ ] Broadcast JOIN to all channel members (do NOT double-send to joining client)
+  [ ] Remove invite after successful join (one-time use)
+  [ ] Send RPL_NAMREPLY(353) + RPL_ENDOFNAMES(366) with '@' prefix for operators
+
+  handlePrivmsg()
   [ ] Parse "PRIVMSG <target> :<message>"
-  [ ] Channel target (#/&): ERR_NOSUCHCHANNEL, ERR_CANNOTSENDTOCHAN, then broadcast
-  [ ] User target: ERR_NOSUCHNICK, then direct send
-  [ ] Add PRIVMSG to dispatch (with registration guard)
+  [ ] Channel target: ERR_NOSUCHCHANNEL, ERR_CANNOTSENDTOCHAN, broadcast to all except sender
+  [ ] User target: ERR_NOSUCHNICK, send directly
 
-CommandHandler.cpp — handlePart()
-  [ ] Parse "PART <#chan> :<reason>" (reason optional, default to nick)
+  handlePart()
+  [ ] Parse "PART <#chan> :<reason>" (reason optional, default to sender nick)
   [ ] ERR_NOSUCHCHANNEL, ERR_NOTONCHANNEL
-  [ ] Broadcast PART to ALL channel members (including the parting client)
-  [ ] removeClient from channel; if channel empty → server->removeChannel()
-  [ ] Add PART to dispatch
+  [ ] Broadcast PART to ALL members including the parting client, then removeClient()
+  [ ] If channel empty → server->removeChannel()
 
-CommandHandler.cpp — handleKick()
+  handleKick()
   [ ] Parse "KICK <#chan> <target> :<reason>" (reason optional)
   [ ] ERR_NOSUCHCHANNEL, ERR_NOTONCHANNEL, ERR_CHANOPRIVSNEEDED, ERR_USERNOTINCHANNEL
-  [ ] Broadcast KICK to all channel members, then removeClient(target) from channel
-  [ ] Add KICK to dispatch
+  [ ] Broadcast KICK to all members, then remove target from channel
 
-TEST GOAL — end of day 2:
-  Two clients: channel messages, private messages, /part, operator /kick all work
+─────────────────────────────────────────
+DAY 3-B  Operator commands + MODE
+─────────────────────────────────────────
 
-────────────────────────────────────────────────────────────────────────────────
-DAY 3 — CommandHandler: INVITE, TOPIC, MODE (i/t/k/l/o)
-────────────────────────────────────────────────────────────────────────────────
-
-CommandHandler.cpp — handleInvite()
+  handleInvite()
   [ ] Parse "INVITE <target> <#chan>"
   [ ] ERR_NOSUCHNICK, ERR_NOSUCHCHANNEL, ERR_NOTONCHANNEL
-  [ ] ERR_CHANOPRIVSNEEDED if channel is +i and inviter is not op
+  [ ] ERR_CHANOPRIVSNEEDED if +i and inviter not op
   [ ] ERR_USERONCHANNEL if target already in channel
   [ ] channel->inviteClient(target)
-  [ ] Send INVITE message to target; send RPL_INVITING(341) to inviter
-  [ ] Add INVITE to dispatch
+  [ ] Send INVITE to target; send RPL_INVITING(341) to inviter
 
-CommandHandler.cpp — handleTopic()
+  handleTopic()
   [ ] Parse "TOPIC <#chan>" (view) or "TOPIC <#chan> :<newtopic>" (set)
   [ ] ERR_NOSUCHCHANNEL, ERR_NOTONCHANNEL
   [ ] View: RPL_NOTOPIC(331) or RPL_TOPIC(332)
-  [ ] Set: ERR_CHANOPRIVSNEEDED if +t and not op; else setTopic + broadcast
-  [ ] Add TOPIC to dispatch
+  [ ] Set: ERR_CHANOPRIVSNEEDED if +t and not op; setTopic + broadcast
 
-Channel.hpp / Channel.cpp — add for MODE support
-  [ ] getModes() — returns current mode string e.g. "+itk secret" or "+l 5"
-  [ ] removePassword() — clears key and _hasPassword flag
-  [ ] removeUserLimit() — clears limit and _hasUserLimit flag
-
-CommandHandler.cpp — handleMode()
+  handleMode()
   [ ] Parse "MODE <target> [modestring] [params...]"
-  [ ] User target (no #): reply RPL_UMODEIS(221) "+" (stub, not required by subject)
-  [ ] Channel, no modestring: reply RPL_CHANNELMODEIS(324) with getModes()
+  [ ] User target (no #): reply RPL_UMODEIS(221) "+" (stub)
+  [ ] Channel only modestring query → RPL_CHANNELMODEIS(324) via getModes()
   [ ] ERR_NOSUCHCHANNEL, ERR_NOTONCHANNEL, ERR_CHANOPRIVSNEEDED
-  [ ] Walk modestring char by char, track +/- sign, consume params as needed:
-        +i / -i  → setInviteOnly()
-        +t / -t  → setTopicRestricted()
+  [ ] Walk modestring char by char, track +/- context, consume params:
+        +i / -i → setInviteOnly()
+        +t / -t → setTopicRestricted()
         +k <key> / -k → setPassword() / removePassword()
-        +l <n>   / -l → setUserLimit() / removeUserLimit()
-        +o <nick>/ -o → addOperator() / removeOperator()  (ERR_USERNOTINCHANNEL if missing)
+        +l <n> / -l → setUserLimit() / removeUserLimit()
+        +o <nick> / -o → addOperator() / removeOperator()
   [ ] Broadcast one combined MODE message for all applied changes
-  [ ] Add MODE to dispatch
 
-TEST GOAL — end of day 3:
-  All 5 modes work. Test each with irssi. Invite flow works end-to-end. TOPIC respects +t.
+TEST GOAL — end of Day 3:
+  All 5 modes work; INVITE + TOPIC flow end-to-end; KICK and PART clean
 
-────────────────────────────────────────────────────────────────────────────────
-DAY 4 — Polish, edge cases, testing, README
-────────────────────────────────────────────────────────────────────────────────
+================================================================================
+  DAY 4 — Shared: polish, testing, README
+================================================================================
 
-Edge cases
-  [ ] JOIN "JOIN #a,#b,#c" — split on comma, process each channel (Utils::split)
-  [ ] JOIN "JOIN #a,#b key1,key2" — match keys to channels by index
+Edge cases (both)
+  [ ] JOIN "JOIN #a,#b,#c" with "JOIN #a,#b key1,key2" — split + match by index
   [ ] MODE +l with non-numeric or zero/negative param — skip silently
-  [ ] NICK collision check and channel/nick lookups should be case-insensitive
-      (IRC: "Batman" == "batman" — use tolower comparison)
+  [ ] NICK and channel name lookups should be case-insensitive
 
-Robustness (subject: must not crash under any circumstance)
-  [ ] Run the nc partial-data test from the subject:
+Robustness (both)
+  [ ] nc partial-data test (subject requirement):
         $ nc -C 127.0.0.1 <port>
         type "com" + ctrl+D, then "man" + ctrl+D, then "d" + Enter
-  [ ] Check memory: on ctrl+C, closeFd() must delete all clients and channels
-  [ ] Run valgrind to confirm no leaks
+  [ ] valgrind — no leaks on clean shutdown (ctrl+C)
 
-Full reference client checklist (irssi or weechat)
-  [ ] Auth: correct password → 001-004; wrong password → 464
-  [ ] JOIN: normal, +i without invite (473), +k wrong key (475), +l full (471)
-  [ ] PRIVMSG: channel and private; errors 403/404/401
+Full irssi checklist (both test together)
+  [ ] Auth: correct password → 001-004; wrong → 464 + disconnect
+  [ ] JOIN: normal, +i (473), +k wrong key (475), +l full (471)
+  [ ] PRIVMSG: channel + private; 403/404/401 errors
   [ ] PART: clean exit, empty channel deleted
-  [ ] KICK: op kicks user; non-op gets 482
-  [ ] INVITE: invite to +i channel; duplicate invite → 443
-  [ ] TOPIC: view (331/332); set as op; blocked by +t for non-op (482)
-  [ ] MODE: each of the 5 flags, set and unset; query with no args → 324
+  [ ] KICK: op kicks; non-op gets 482
+  [ ] INVITE: invite to +i; already in channel → 443
+  [ ] TOPIC: view 331/332; op sets; +t blocks non-op (482)
+  [ ] MODE: each flag set + unset; query → 324
 
-README.md (mandatory — Chapter V of the subject)
-  [ ] First line italicized: *This project has been created as part of the 42
-      curriculum by <login1>[, <login2>...]*
-  [ ] "Description" — what the project is, goal, brief overview
-  [ ] "Instructions" — compile (make), run (./ircserv <port> <password>),
-      which IRC client to use and how to connect
-  [ ] "Resources" — IRC references (RFC 1459, etc.) + how AI was used
-      (for which tasks and which parts)
+README.md — Person B (mandatory, Chapter V of subject)
+  [ ] First line italicized: *This project has been created as part of the
+      42 curriculum by <login1>[, <login2>...]*
+  [ ] "Description" — goal and brief overview
+  [ ] "Instructions" — make, ./ircserv <port> <password>, how to connect with irssi
+  [ ] "Resources" — RFC 1459 + how AI was used (which tasks, which parts)
 
 ================================================================================
