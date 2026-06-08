@@ -1,0 +1,682 @@
+================================================================================
+  ft_irc — STUDY GUIDE FOR CORRECTION
+================================================================================
+
+This file covers everything you need to understand and explain during the
+correction. Each section explains the WHY, not just the what.
+
+Read it in order — each section builds on the previous one.
+
+
+================================================================================
+  CHAPTER 1 — NETWORK FUNDAMENTALS
+================================================================================
+
+------------------------------------------------------------------------
+1.1  What is a socket?
+------------------------------------------------------------------------
+
+A socket is a file descriptor that represents one end of a network connection.
+In Unix, everything is a file. A socket is no different — you read from it
+with recv(), write to it with send(), and close it with close().
+
+When you call:
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+
+You are asking the OS to create a TCP socket. It returns an integer (the fd).
+From now on, everything you do with this connection uses that integer.
+
+AF_INET   = IPv4
+SOCK_STREAM = TCP (reliable, ordered, stream-based)
+
+------------------------------------------------------------------------
+1.2  What is TCP and why does it matter for IRC?
+------------------------------------------------------------------------
+
+TCP guarantees:
+  - Data arrives in the order it was sent
+  - Data arrives complete (no missing bytes)
+  - The OS retransmits lost packets automatically
+
+But TCP is a STREAM. There is no concept of "messages". If you send
+"HELLO\r\nWORLD\r\n", the receiver might get:
+  - "HELLO\r\nWORLD\r\n" in one read   (lucky)
+  - "HELLO\r\n" then "WORLD\r\n"       (two reads)
+  - "HEL" then "LO\r\nWOR" then "LD\r\n" (three reads)
+
+This is why every Client has a _recvBuffer. You accumulate bytes until
+you see a full line (\n), then process it. Never assume one recv() = one command.
+
+------------------------------------------------------------------------
+1.3  The server socket vs client sockets
+------------------------------------------------------------------------
+
+There are TWO kinds of sockets in a server:
+
+  SERVER SOCKET (_serverSocket):
+    - Created once with socket() + bind() + listen()
+    - Never sends or receives actual data
+    - Its only job: accept() new connections
+    - When POLLIN fires on it: a new client is waiting
+
+  CLIENT SOCKET (returned by accept()):
+    - One per connected client
+    - This is where you actually send/recv data
+    - When POLLIN fires: the client sent something
+    - When POLLHUP fires: the client disconnected
+
+------------------------------------------------------------------------
+1.4  What is bind(), listen(), accept()?
+------------------------------------------------------------------------
+
+bind():   Attach the socket to a specific port on this machine.
+          Without bind, the OS assigns a random port.
+
+listen(): Tell the OS "start accepting connections on this socket".
+          SOMAXCONN = the maximum backlog (connections waiting to be accept()ed).
+
+accept(): Pull one waiting connection out of the backlog.
+          Returns a NEW fd for that specific client.
+          The original server socket is untouched and keeps listening.
+
+------------------------------------------------------------------------
+1.5  Non-blocking I/O — the most important concept in this project
+------------------------------------------------------------------------
+
+By default, recv() BLOCKS. If the client hasn't sent anything, your program
+freezes there and can't serve other clients. With 100 clients connected,
+you can't afford to block on any one of them.
+
+Solution: set the socket to non-blocking mode:
+
+    fcntl(fd, F_SETFL, O_NONBLOCK);
+
+Now recv() returns immediately:
+  - If data is available: returns the bytes
+  - If nothing is ready:  returns -1 with errno = EAGAIN or EWOULDBLOCK
+
+Same for send():
+  - If the kernel buffer has space: sends and returns
+  - If the buffer is full:          returns -1 with EAGAIN
+
+This is why we check errno after a -1 return:
+
+    if (errno != EAGAIN && errno != EWOULDBLOCK)
+        removeClient(fd);   // real error, not just "try again"
+
+
+================================================================================
+  CHAPTER 2 — poll() AND THE EVENT LOOP
+================================================================================
+
+------------------------------------------------------------------------
+2.1  Why poll()?
+------------------------------------------------------------------------
+
+The problem: you have many clients. You can't call recv() on each one
+sequentially (it would block or waste CPU spinning). You need a way to ask
+the OS: "tell me which of these fds has something to do."
+
+poll() does exactly that:
+
+    poll(&_pollfds[0], _pollfds.size(), -1);
+
+You hand it an array of struct pollfd. Each has:
+  fd      — which file descriptor to watch
+  events  — what to watch for (POLLIN, POLLOUT)
+  revents — what actually happened (filled in by OS)
+
+-1 as timeout = block forever until SOMETHING happens.
+
+After poll() returns, you loop over the array and check revents.
+
+------------------------------------------------------------------------
+2.2  POLLIN vs POLLOUT
+------------------------------------------------------------------------
+
+POLLIN:
+  Set when there is data to read (recv() will not block).
+  Also set when a new connection is waiting on the server socket.
+  Also set when the remote peer closed the connection (recv returns 0).
+
+POLLOUT:
+  Set when the socket's send buffer has space (send() will not block).
+  You do NOT watch POLLOUT all the time — only when you have data queued.
+  Keeping POLLOUT active when you have nothing to send wastes CPU.
+
+Our pattern:
+  - Normally: events = POLLIN only
+  - When client->hasPendingData(): events |= POLLOUT  (add the flag)
+  - After trySend() empties the buffer: events &= ~POLLOUT (remove it)
+
+------------------------------------------------------------------------
+2.3  POLLHUP / POLLERR / POLLNVAL
+------------------------------------------------------------------------
+
+POLLHUP:  Remote end closed the connection (hangup).
+          IMPORTANT: POLLHUP can be set at the same time as POLLIN
+          if the client sent data AND then closed. Always process POLLIN
+          first, or you will lose that last data.
+
+POLLERR:  Error on the socket.
+POLLNVAL: The fd is not open / invalid.
+
+All three mean: remove this client.
+
+------------------------------------------------------------------------
+2.4  Why iterate backwards over _pollfds?
+------------------------------------------------------------------------
+
+    for (int i = (int)_pollfds.size() - 1; i >= 0; --i)
+
+When you call removeClient(), it erases an element from _pollfds.
+If you erase index i, everything at i+1, i+2... shifts left by one.
+
+Iterating forward:  you would skip the element that shifted into position i.
+Iterating backward: erased elements are always "behind" you (higher index,
+                    already processed). Safe.
+
+
+================================================================================
+  CHAPTER 3 — THE SEND BUFFER PATTERN
+================================================================================
+
+------------------------------------------------------------------------
+3.1  The problem with direct send()
+------------------------------------------------------------------------
+
+If you call send() directly when you want to send a message:
+  - The kernel's socket buffer might be full (client is reading slowly)
+  - send() returns a partial count, or -1 with EAGAIN
+  - You lose the unsent bytes
+
+------------------------------------------------------------------------
+3.2  Our solution: queue + POLLOUT flush
+------------------------------------------------------------------------
+
+sendMessage() NEVER calls send(). It just appends to _sendBuffer:
+
+    void Client::sendMessage(const std::string& msg)
+    {
+        _sendBuffer += msg + "\r\n";
+    }
+
+The poll loop sets POLLOUT when there's data waiting.
+When POLLOUT fires, trySend() flushes what the kernel will accept:
+
+    ssize_t sent = send(_fd, _sendBuffer.c_str(), _sendBuffer.length(),
+                        MSG_DONTWAIT | MSG_NOSIGNAL);
+    if (sent > 0)
+        _sendBuffer.erase(0, sent);   // remove only what was actually sent
+
+If the buffer is only half-flushed, POLLOUT stays set and we retry next cycle.
+
+MSG_NOSIGNAL:  Don't send SIGPIPE if the client disconnected. Return -1 instead.
+MSG_DONTWAIT:  Same as non-blocking, belt-and-suspenders.
+
+------------------------------------------------------------------------
+3.3  Why sendReply() exists
+------------------------------------------------------------------------
+
+IRC numeric replies always have the same format:
+    :server CODE nick :message
+
+sendReply() formats this for you:
+
+    client->sendReply("001", ":Welcome");
+    → queues ":localhost 001 raphael :Welcome\r\n"
+
+The nick defaults to "*" if the client hasn't set one yet (pre-registration).
+
+
+================================================================================
+  CHAPTER 4 — THE IRC PROTOCOL
+================================================================================
+
+------------------------------------------------------------------------
+4.1  Message format
+------------------------------------------------------------------------
+
+Every IRC message follows this structure:
+
+    [:prefix] COMMAND [param1] [param2] [...] [:trailing]
+
+- prefix:   optional, starts with ':'. Identifies the sender.
+            Servers add this when forwarding messages. Clients rarely send it.
+- COMMAND:  always uppercase, the instruction (NICK, JOIN, PRIVMSG...)
+- params:   space-separated words
+- trailing: starts with ':', can contain spaces. Must be last.
+
+Examples:
+    PASS secret
+    NICK raphael
+    USER raph 0 * :Raphael Feger
+    PRIVMSG #general :hello there world
+    :raphael!raph@127.0.0.1 JOIN #general
+
+------------------------------------------------------------------------
+4.2  The 3-phase registration
+------------------------------------------------------------------------
+
+A client MUST complete this sequence before they can do anything:
+
+    Phase 0 — client sends PASS <password>
+      Server verifies. Wrong password → ERR_PASSWDMISMATCH (464) + disconnect.
+
+    Phase 1 — client sends NICK <nickname> and USER <user> <host> <server> :<realname>
+      (order doesn't matter, both must arrive)
+      After both: server sends welcome burst.
+
+    Phase 2 — client is registered
+      All commands are now available.
+
+Our handle() enforces this with two early-return guards:
+    if (!client->isPassOK())   → only PASS and QUIT allowed
+    if (!client->isRegistered()) → only NICK, USER, QUIT allowed
+
+------------------------------------------------------------------------
+4.3  Welcome burst (001-004)
+------------------------------------------------------------------------
+
+After successful registration, the server sends four messages:
+
+    001 RPL_WELCOME   ":Welcome to the IRC Network <nick>"
+    002 RPL_YOURHOST  ":Your host is localhost, running version 1.0"
+    003 RPL_CREATED   ":This server was created today"
+    004 RPL_MYINFO    "localhost 1.0 o itklno"
+
+IRC clients (like irssi) wait for 001 before considering the connection ready.
+If 001 never arrives, the client will not show the server in its window.
+
+------------------------------------------------------------------------
+4.4  Numeric reply codes
+------------------------------------------------------------------------
+
+All server responses to clients use 3-digit codes defined in RFC 1459.
+They are NOT magic numbers — they each have a name and meaning.
+
+Key codes:
+    001-004  Welcome burst (success)
+    331      RPL_NOTOPIC        — channel has no topic
+    332      RPL_TOPIC          — channel topic
+    341      RPL_INVITING       — INVITE sent confirmation
+    353      RPL_NAMREPLY       — list of names in channel
+    366      RPL_ENDOFNAMES     — end of NAMREPLY
+    401      ERR_NOSUCHNICK     — nick doesn't exist
+    403      ERR_NOSUCHCHANNEL  — channel doesn't exist
+    432      ERR_ERRONEUSNICKNAME
+    433      ERR_NICKNAMEINUSE
+    451      ERR_NOTREGISTERED  — must register first
+    461      ERR_NEEDMOREPARAMS
+    462      ERR_ALREADYREGISTRED
+    464      ERR_PASSWDMISMATCH
+    471      ERR_CHANNELISFULL  — channel has user limit (+l)
+    473      ERR_INVITEONLYCHAN — channel is invite-only (+i)
+    475      ERR_BADCHANNELKEY  — wrong channel password (+k)
+    482      ERR_CHANOPRIVSNEEDED — must be operator
+
+------------------------------------------------------------------------
+4.5  The IRC prefix (nick!user@host)
+------------------------------------------------------------------------
+
+When the server relays messages between clients, it adds a prefix
+so the recipient knows who sent it:
+
+    :raphael!raph@127.0.0.1 PRIVMSG #general :hello
+
+This is built by Client::getPrefix():
+    return _nickname + "!" + _username + "@" + _hostname;
+
+The client sees the sender's identity in every relayed message.
+
+------------------------------------------------------------------------
+4.6  CAP and PONG
+------------------------------------------------------------------------
+
+CAP: Modern IRC clients send "CAP LS 302" before PASS to negotiate
+     optional capabilities. We don't implement any capabilities, so
+     we silently ignore CAP messages. Ignoring them is RFC-compliant.
+
+PONG: Servers send PING to check if a client is alive. The client
+      replies with PONG. We handle PING from clients, ignore PONG.
+
+
+================================================================================
+  CHAPTER 5 — CLASS BY CLASS
+================================================================================
+
+------------------------------------------------------------------------
+5.1  Server
+------------------------------------------------------------------------
+
+Owns everything. Central coordinator.
+
+Key members:
+    _serverSocket  — the listening socket
+    _clients       — map<int fd, Client*>
+    _channels      — map<string name, Channel*>
+    _pollfds       — vector<struct pollfd> — the poll watchlist
+    _password      — server password
+
+Key methods:
+    initServer()      — startup, poll loop
+    acceptClient()    — handles new connections
+    receivedMessage() — splits recv buffer into lines, dispatches commands
+    removeClient()    — broadcasts QUIT, closes fd, cleans up
+    getClientByNickname() — linear scan for nick uniqueness check
+
+------------------------------------------------------------------------
+5.2  Client
+------------------------------------------------------------------------
+
+Represents one connected socket and all its state.
+
+Key members:
+    _fd          — the socket file descriptor
+    _passOK      — sent correct PASS?
+    _registered  — completed NICK + USER + PASS?
+    _nickname    — current nick
+    _username    — from USER command (first param)
+    _realname    — from USER command (fourth param, after ':')
+    _hostname    — IP address (set at accept() time)
+    _recvBuffer  — accumulates partial reads
+    _sendBuffer  — queues outgoing data
+    _channels    — vector<Channel*> the client is in
+
+Key methods:
+    sendMessage()   — appends to _sendBuffer (never calls send directly)
+    sendReply()     — formats ":localhost CODE nick :msg" and queues it
+    trySend()       — flushes _sendBuffer via send() non-blocking
+    hasPendingData()— used by Server to set POLLOUT flag
+    getPrefix()     — returns "nick!user@host"
+
+------------------------------------------------------------------------
+5.3  Channel
+------------------------------------------------------------------------
+
+Represents one IRC channel (#name).
+
+Key members:
+    _name           — e.g. "#general"
+    _topic          — current topic string
+    _clients        — vector<Client*> of members
+    _operators      — set<Client*> of ops
+    _invitedClients — set<Client*> for invite-only mode
+    _inviteOnly     — bool (+i mode)
+    _topicRestricted— bool (+t mode)
+    _password       — channel key (+k mode)
+    _userLimit      — max members (+l mode)
+
+Key methods:
+    broadcast(msg, exclude)  — send to all members, optionally skip one
+    addClient / removeClient — membership management
+    isOperator / addOperator — op management
+
+------------------------------------------------------------------------
+5.4  CommandHandler
+------------------------------------------------------------------------
+
+Stateless class. All methods are static. Owns no data.
+It is a namespace for command logic.
+
+Why static? Commands need access to Server and Client state, but the
+handler itself doesn't need to persist between calls. Making everything
+static avoids needing to create an instance.
+
+parseCommand():
+  Index-based tokenizer. Handles the ':trailing' rule explicitly.
+  Deliberately different from stringstream approach.
+
+handle():
+  Entry point. Called by Server::receivedMessage() for every complete line.
+  1. Parse the line into tokens
+  2. Uppercase the command
+  3. Silently ignore CAP and PONG
+  4. Apply the 3-phase registration guard
+  5. Dispatch via static map
+
+The dispatch map:
+  typedef void (*HandlerFunc)(Server*, Client*, vector<string>&);
+  static map<string, HandlerFunc> handlers;
+  Initialized once with a static bool guard.
+  O(log n) lookup instead of a long if/else chain.
+
+------------------------------------------------------------------------
+5.5  Utils
+------------------------------------------------------------------------
+
+Free functions in a namespace. No class needed.
+
+isValidNickname():
+  IRC nicks must be 1-9 chars, start with a letter, rest can be
+  letters/digits/- or _. We enforce this per RFC 1459.
+
+split():
+  Splits a string by a delimiter. Used to parse comma-separated
+  channel lists in JOIN (e.g. "JOIN #a,#b,#c").
+
+
+================================================================================
+  CHAPTER 6 — DESIGN DECISIONS (questions the corrector will ask)
+================================================================================
+
+------------------------------------------------------------------------
+"Why use poll() and not select() or epoll()?"
+------------------------------------------------------------------------
+
+select(): older, limited to 1024 fds (FD_SETSIZE), less clean API.
+epoll():  Linux-only, more efficient for 10,000+ connections. Overkill
+          for an IRC server that handles a few dozen clients.
+poll():   clean API, no fd limit, portable. Perfect for this scale.
+          The subject also explicitly requires poll().
+
+------------------------------------------------------------------------
+"Why a static dispatch map instead of if/else?"
+------------------------------------------------------------------------
+
+1. O(log n) vs O(n) — map.find() vs scanning a chain of if/else.
+   For 15 commands, not a big deal in practice, but cleaner.
+
+2. Adding a new command is one line: handlers["FOO"] = &handleFoo.
+   No touching the dispatch logic.
+
+3. The map is initialized once (static bool guard) — no rebuild cost
+   on every call.
+
+------------------------------------------------------------------------
+"Why does sendMessage() not call send() directly?"
+------------------------------------------------------------------------
+
+send() can fail or send partial data if the kernel's socket buffer is full
+(the client is reading slowly). If we drop data on failure, the IRC
+session is corrupted — the client receives truncated messages.
+
+The send buffer pattern guarantees delivery: data stays in _sendBuffer
+until the kernel confirms it received it, then we erase only that portion.
+
+------------------------------------------------------------------------
+"What happens if two clients try to register with the same nickname?"
+------------------------------------------------------------------------
+
+handleNick() calls server->getClientByNickname(newNick) which scans
+all connected clients. If a different client already has that nick,
+we return ERR_NICKNAMEINUSE (433) and don't set the nickname.
+
+The check `conflict != client` allows a client to NICK to their current
+nick (no-op) without getting an error.
+
+------------------------------------------------------------------------
+"What is SIGPIPE and why do we ignore it?"
+------------------------------------------------------------------------
+
+When you call send() on a socket whose remote end has closed, the OS
+sends SIGPIPE to your process. The default handler terminates the process.
+
+We do two things:
+1. signal(SIGPIPE, SIG_IGN) in initServer() — process-wide ignore
+2. MSG_NOSIGNAL flag on every send() — per-call ignore
+
+Belt and suspenders.
+
+------------------------------------------------------------------------
+"Why do you check POLLIN before POLLHUP?"
+------------------------------------------------------------------------
+
+When a client sends QUIT and immediately closes the connection, the kernel
+sets both POLLIN (data in buffer) and POLLHUP (connection closed) in the
+same poll() call.
+
+If you check POLLHUP first, you remove the client and skip POLLIN —
+the QUIT message is lost, and irssi (which waits for ERROR :Closing Link
+before closing its window) appears to hang.
+
+Checking POLLIN first: you drain and process the QUIT, send ERROR,
+then POLLHUP fires on the next iteration (by which time removeClient
+has already run) or you detect the EOF via recv() returning 0.
+
+------------------------------------------------------------------------
+"What does the ERROR :Closing Link message do?"
+------------------------------------------------------------------------
+
+RFC 1459 requires the server to send this before closing a connection.
+IRC clients like irssi use it as the signal to close the connection
+window. Without it, /quit in irssi appears to do nothing.
+
+We send it directly (not via the send buffer) because we close the fd
+immediately after — the send buffer would never be flushed.
+
+------------------------------------------------------------------------
+"What is the nc -C flag?"
+------------------------------------------------------------------------
+
+Without -C, nc sends bare \n line endings. IRC requires \r\n.
+-C makes nc send \r\n, matching what IRC clients send.
+
+Our parser handles both (we split on \n and strip trailing \r), so
+it works either way. But -C is the correct way to test.
+
+------------------------------------------------------------------------
+"Walk me through what happens when a client types PASS, NICK, USER"
+------------------------------------------------------------------------
+
+1. Client sends "PASS secret\r\n"
+   - recv() in receivedMessage() puts it in _recvBuffer
+   - Parser finds \n, extracts "PASS secret" (strips \r)
+   - handle() called: isPassOK() is false → Phase 0
+   - handlePass(): params[0]="secret" == _password → setPassOK(true)
+
+2. Client sends "NICK raphael\r\n"
+   - handle() called: isPassOK() true, isRegistered() false → Phase 1
+   - handleNick(): isValidNickname("raphael") ok, no conflict
+   - setNickname("raphael")
+   - tryRegister(): passOK=true, hasNick=true, hasUser=false → not yet
+
+3. Client sends "USER raph 0 * :Raphael Feger\r\n"
+   - parseCommand gives: ["USER", "raph", "0", "*", "Raphael Feger"]
+   - handleUser(): setUsername("raph"), setRealname("Raphael Feger")
+   - tryRegister(): passOK=true, hasNick=true, hasUser=true → register!
+   - setRegistered(true)
+   - sendWelcomeMessages(): queues 001, 002, 003, 004 into _sendBuffer
+   - poll() fires POLLOUT on next cycle → trySend() flushes the buffer
+   - Client sees the welcome messages
+
+
+================================================================================
+  CHAPTER 7 — THE CHANNEL SYSTEM (Person B's work — for completeness)
+================================================================================
+
+------------------------------------------------------------------------
+7.1  Channel modes (the +flags system)
+------------------------------------------------------------------------
+
+Modes are properties of a channel set by operators. Each is a letter:
+
+  +i  invite-only   — only invited users can join
+  +t  topic lock    — only operators can change the topic
+  +k  key           — channel has a password, join requires it
+  +l  limit         — maximum number of members
+  +o  operator      — grants/removes operator status to a user
+
+Set with: MODE #chan +i
+Unset with: MODE #chan -i
+With param: MODE #chan +k password
+            MODE #chan +l 10
+            MODE #chan +o raphael
+
+------------------------------------------------------------------------
+7.2  JOIN flow
+------------------------------------------------------------------------
+
+When a client JOINs a channel:
+1. Check password (+k) → ERR_BADCHANNELKEY (475) if wrong
+2. Check invite-only (+i) → ERR_INVITEONLYCHAN (473) if not invited
+3. Check user limit (+l) → ERR_CHANNELISFULL (471) if full
+4. If channel doesn't exist: create it, make the joiner an operator
+5. Broadcast ":nick!user@host JOIN #chan" to all members
+6. Send RPL_NAMREPLY (353) listing all members (@nick for ops)
+7. Send RPL_ENDOFNAMES (366)
+8. Remove the join invite (one-time use)
+
+------------------------------------------------------------------------
+7.3  PRIVMSG flow
+------------------------------------------------------------------------
+
+"PRIVMSG #general :hello"
+1. Find the channel (or user for direct message)
+2. Check client is in the channel → ERR_CANNOTSENDTOCHAN (404)
+3. broadcast(":sender PRIVMSG #chan :hello", sender) — all except sender
+
+
+================================================================================
+  CHAPTER 8 — THINGS TO BE ABLE TO DEMONSTRATE
+================================================================================
+
+These are what the corrector will likely ask you to show live:
+
+  [ ] Connect with nc, complete registration, see 001-004
+  [ ] Wrong password → immediate disconnect + 464
+  [ ] Duplicate nickname → 433 error
+  [ ] QUIT → server logs disconnect, irssi window closes
+  [ ] Connect with irssi: irssi -c 127.0.0.1 -p 6667 -n nick -w password
+  [ ] JOIN a channel, PRIVMSG, PART
+  [ ] KICK a user (must be operator)
+  [ ] INVITE + invite-only channel
+  [ ] TOPIC — view and set
+  [ ] MODE — each of +i -i +t -t +k +l +o
+  [ ] Two clients talking via PRIVMSG
+  [ ] Valgrind: no leaks on clean shutdown (Ctrl+C)
+  [ ] The partial-data nc test (subject requirement):
+        nc -C 127.0.0.1 6667
+        type "com" → Ctrl+D (no newline)
+        type "mand" → Enter
+      (tests that the recv buffer accumulation works correctly)
+
+
+================================================================================
+  CHAPTER 9 — VOCABULARY CHEAT SHEET
+================================================================================
+
+socket       A file descriptor representing a network connection endpoint
+fd           File descriptor — an integer the OS uses to identify an open file/socket
+bind()       Attach a socket to a port
+listen()     Start accepting connections on a socket
+accept()     Pull one waiting connection from the backlog, returns new fd
+recv()       Read data from a socket (like read() but for sockets)
+send()       Write data to a socket (like write() but for sockets)
+poll()       Wait for one or more fds to become ready for I/O
+POLLIN       "There is data to read" (or new connection on server socket)
+POLLOUT      "The socket buffer has space — you can write"
+POLLHUP      "The remote peer closed the connection"
+EAGAIN       "Nothing ready right now, try again later" (non-blocking return)
+SIGPIPE      Signal sent when writing to a closed socket — we ignore it
+MSG_NOSIGNAL Flag for send() to suppress SIGPIPE
+MSG_DONTWAIT Flag for send()/recv() to make one call non-blocking
+non-blocking A fd that returns immediately instead of waiting
+TCP stream   Data arrives as a continuous stream, not as discrete messages
+operator     IRC channel admin who can kick, set modes, etc.
+prefix       "nick!user@host" — sender identity in IRC messages
+numeric reply A 3-digit server response code (001, 433, 464, etc.)
+trailing     The last parameter in an IRC message, after ':', can have spaces
+
+================================================================================
