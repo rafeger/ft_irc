@@ -84,7 +84,7 @@ void Server::acceptClient()
 	clientPoll.events = POLLIN;
 	clientPoll.revents = 0;
 	cl->setFd(accClient);
-	cl->setIPAddr(inet_ntoa(clientAddr.sin_addr));
+	cl->setHostname(inet_ntoa(clientAddr.sin_addr));
 	_pollfds.push_back(clientPoll);
 	_clients[accClient] = cl;
 	std::cout << "Client " << accClient << " connected" << std::endl;

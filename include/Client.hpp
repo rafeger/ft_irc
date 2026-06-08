@@ -1,44 +1,68 @@
 #ifndef CLIENT_HPP
-#define CLIENT_HPP
+# define CLIENT_HPP
 
-#include <unistd.h>
-#include <string>
-#include <iostream>
+# include <string>
+# include <vector>
+
+class Channel;
 
 class Client
 {
 	private:
-		int		_clientFd;
-		std::string	_IPAddr;
-		bool _passOK;
-		bool _isRegistered;
-		std::string _username;
-		std::string _nickname;
-		std::string _buffer;
+		int						_fd;
+		std::string				_hostname;
+		std::string				_nickname;
+		std::string				_username;
+		std::string				_realname;
+		std::string				_recvBuffer;
+		std::string				_sendBuffer;
+		bool					_passOK;
+		bool					_registered;
+		std::vector<Channel*>	_channels;
 
 	public:
 		Client();
 		~Client();
 
-		int getFd() const;
-		void setFd(int fd);
-		void setIPAddr(const std::string& IPAddr);
-		const std::string& getIPAddr() const;
-		bool isPassOK() const;
-		void setPassOK(bool value);
-		bool isRegistered() const;
-		void setRegistered(bool value);
-		void setNickname(const std::string& nickname);
-		const std::string& getNickname() const;
-		void setUsername(const std::string& username);
-		const std::string& getUsername() const;
-		bool hasNick() const;
-		bool hasUser() const;
-		void appendBuffer(const std::string& data);
-		std::string& getBuffer();
-		const std::string& getBuffer() const;
-		void sendMessage(const std::string& msg);
-		std::string getPrefix() const;
+		// Getters
+		int							getFd() const;
+		const std::string&			getHostname() const;
+		const std::string&			getNickname() const;
+		const std::string&			getUsername() const;
+		const std::string&			getRealname() const;
+		std::string&				getBuffer();
+		const std::string&			getBuffer() const;
+		const std::vector<Channel*>& getChannels() const;
+		std::string					getPrefix() const;
+
+		// Setters
+		void	setFd(int fd);
+		void	setHostname(const std::string& hostname);
+		void	setNickname(const std::string& nickname);
+		void	setUsername(const std::string& username);
+		void	setRealname(const std::string& realname);
+		void	setPassOK(bool value);
+		void	setRegistered(bool value);
+
+		// State checks
+		bool	isPassOK() const;
+		bool	isRegistered() const;
+		bool	hasNick() const;
+		bool	hasUser() const;
+		bool	hasPendingData() const;
+		bool	isInChannel(Channel* channel) const;
+
+		// Buffering
+		void	appendBuffer(const std::string& data);
+
+		// Messaging
+		void	sendMessage(const std::string& msg);
+		void	sendReply(const std::string& code, const std::string& message);
+		bool	trySend();
+
+		// Channel membership tracking
+		void	joinChannel(Channel* channel);
+		void	leaveChannel(Channel* channel);
 };
 
 #endif

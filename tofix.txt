@@ -1,0 +1,6 @@
+Channel.cpp:144	isInvited() -> devrait check _invitedClients mais check _operators a la place(le invite-only mode marche pas)
+Server.cpp:213-215	handleJoin() call broadcast() puis envoie JOIN au client dcp double message!
+Server.cpp:200	handleJoin() check pas le password
+Server.cpp:268	handleNick() double /r/n avec sendMessage()
+Server.cpp:331-354	handleCmd() PASS USER JOIN ok | NICK never dispatched
+Server.cpp:219	handleJoin() envoie 331 sans esspace avant :No topic is set
