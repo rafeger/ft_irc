@@ -80,7 +80,7 @@ DAY 1-B  Channel bug fix + additions
 ─────────────────────────────────────────
 
 Channel.cpp — bug fix
-  [!] isInvited(): fix set lookup — checks _operators instead of _invitedClients
+  [X] isInvited(): fix set lookup — checks _operators instead of _invitedClients
       Fix: return (_invitedClients.find(client) != _invitedClients.end());
 
 Channel.hpp / Channel.cpp — additions needed for MODE (do this before handleMode)
