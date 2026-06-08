@@ -40,21 +40,15 @@ class Server
 		static void handleSignal(int signum);
 		void closeFd();
 		void acceptClient();
-		void removeClient(int fd);
+		void removeClient(int fd, const std::string& reason = "Connection closed");
 		void receivedMessage(int fd);
 		void initServer(const std::string& port, const std::string& password);
 		void run();
 		Channel* getChannel(const std::string& name);
 		void createChannel(const std::string& name);
 		void removeChannel(const std::string& name);
-		void handleCmd(Client* client, const std::string& msg);
-		void handlePass(Client* client, const std::string& password);
-		void handleNick(Client* client, const std::string& nickname);
-		void handleUser(Client* client, const std::string& username);
-		void handleJoin(Client* client, const std::string& channel);
-		void handlePart(Client* client, const std::string& channel);
-		void handlePrivateMsg(Client* client, const std::string& target, const std::string& msg);
-		void tryRegister(Client* client);
+		Client* getClientByNickname(const std::string& nickname);
+		const std::string& getPassword() const { return _password; }
 
 		class SocketException : public std::exception
 		{

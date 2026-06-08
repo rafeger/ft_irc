@@ -1,0 +1,304 @@
+================================================================================
+  ft_irc — Deep Dive / Architecture Tutorial
+================================================================================
+
+This file is a self-contained walkthrough of how the server works, written
+to be used as a reference in future sessions. Hand it back to start from
+where we left off.
+
+
+------------------------------------------------------------------------
+1. STARTUP: main.cpp → initServer()
+------------------------------------------------------------------------
+
+    Server serv;
+    serv.initServer(argv[1], argv[2]);
+
+initServer does three things in order:
+  - Stores port and password
+  - Calls signal(SIGPIPE, SIG_IGN)
+  - Calls createServerSocket(), then enters the poll loop forever
+
+WHY signal(SIGPIPE)?
+If a client disconnects mid-send, the OS sends SIGPIPE to your process,
+which kills it by default. Ignoring it means send() just returns -1 instead,
+which we can handle gracefully.
+
+
+------------------------------------------------------------------------
+2. THE POLL LOOP — the heart of the server
+------------------------------------------------------------------------
+
+    poll(&_pollfds[0], _pollfds.size(), -1)
+
+poll() is how you handle many connections in a single thread without blocking.
+You give the OS a list of file descriptors and what you want to watch for,
+and it returns which ones have activity. -1 means "block forever until
+something happens."
+
+_pollfds is a std::vector<struct pollfd>. Each entry has:
+  fd       — the file descriptor to watch
+  events   — what you want to watch for  (POLLIN = readable, POLLOUT = writable)
+  revents  — what actually happened       (filled in by the OS after poll returns)
+
+At startup only the server socket is in the list.
+Every accepted client gets added to it.
+
+WHY ITERATE BACKWARDS?
+
+    for (int i = static_cast<int>(_pollfds.size()) - 1; i >= 0; --i)
+
+When you erase element at index i, everything at i+1, i+2... shifts left.
+Iterating forward would skip the element that shifted into position i.
+Going backwards means erased elements are always behind you — safe.
+
+
+------------------------------------------------------------------------
+3. NEW CONNECTION: acceptClient()
+------------------------------------------------------------------------
+
+When _pollfds[i].fd == _serverSocket and POLLIN fires, a new TCP
+connection is waiting. accept() creates a new fd for that client:
+
+    int accClient = accept(_serverSocket, ...);
+    fcntl(accClient, F_SETFL, O_NONBLOCK);
+
+NON-BLOCKING is critical. If recv() or send() blocked, one slow client
+would freeze all other clients. Non-blocking means they return immediately
+with EAGAIN if there's nothing ready.
+
+The new client gets:
+  - A Client* object tracking its state
+  - Added to _clients[fd]
+  - Added to _pollfds with events = POLLIN
+
+
+------------------------------------------------------------------------
+4. INCOMING DATA: receivedMessage()
+------------------------------------------------------------------------
+
+    ssize_t bytes = recv(fd, buffer, sizeof(buffer) - 1, 0);
+
+recv() reads whatever is available right now (up to 1023 bytes).
+IMPORTANT: TCP is a stream, not a message protocol. One recv() call
+might give you half a command, or three commands at once.
+
+That is why every Client has a receive buffer (_recvBuffer):
+
+    client->appendBuffer(buffer);    // accumulate raw bytes
+
+Then we split on newlines:
+
+    while ((pos = recvBuf.find('\n')) != std::string::npos)
+    {
+        std::string line = recvBuf.substr(0, pos);
+        recvBuf.erase(0, pos + 1);
+        if (!line.empty() && line.back() == '\r')
+            line.resize(line.size() - 1);   // strip \r from \r\n
+        CommandHandler::handle(this, client, line);
+        if (_clients.find(fd) == _clients.end())
+            return;  // client was removed mid-loop (QUIT, bad password)
+    }
+
+The last find(fd) check is important: handle() might call removeClient()
+(on QUIT or bad password). After that, 'client' is a dangling pointer —
+touching recvBuf would be use-after-free.
+
+
+------------------------------------------------------------------------
+5. OUTGOING DATA: the send buffer + POLLOUT
+------------------------------------------------------------------------
+
+OLD approach: sendMessage() called send() directly.
+Problem: if the kernel's socket buffer is full, send() blocks or gives
+         partial data.
+
+NEW approach: sendMessage() just queues:
+
+    void Client::sendMessage(const std::string& msg)
+    {
+        _sendBuffer += msg + "\r\n";
+    }
+
+The actual write happens in trySend(), called by the POLLOUT handler:
+
+    // In initServer poll loop:
+    if (cit->second->hasPendingData())
+        _pollfds[i].events |= POLLOUT;   // ask poll: tell me when socket is writable
+    else
+        _pollfds[i].events &= ~POLLOUT;  // done, stop watching
+
+    if (_pollfds[i].revents & POLLOUT)
+        cit->second->trySend();          // flush what the socket accepts right now
+
+trySend() uses MSG_NOSIGNAL | MSG_DONTWAIT — non-blocking, and suppresses
+SIGPIPE at the syscall level as a second layer of defence.
+
+
+------------------------------------------------------------------------
+6. COMMAND PARSING: parseCommand()
+------------------------------------------------------------------------
+
+IRC message format:  [:prefix] COMMAND [param1 param2 ...] [:trailing]
+
+The trailing param starts with ':' and can contain spaces — everything
+after it is one token. Example:
+
+    PRIVMSG #general :hello there world
+    → tokens: ["PRIVMSG", "#general", "hello there world"]
+
+Our parser is index-based (walks character by character).
+This is deliberately different from the stringstream approach used in
+some reference implementations.
+
+The ':trailing' rule is handled explicitly:
+
+    if (line[i] == ':')
+    {
+        tokens.push_back(line.substr(i + 1));   // rest of line is one token
+        break;
+    }
+
+
+------------------------------------------------------------------------
+7. THE 3-PHASE REGISTRATION GUARD in handle()
+------------------------------------------------------------------------
+
+IRC registration is a 3-step handshake:
+
+    Client → PASS  (correct password)
+    Client → NICK  (valid, unique nickname)
+    Client → USER  (username + realname)
+    Server → 001 002 003 004  (welcome burst)
+
+handle() enforces this with two early-return guards:
+
+    Phase 0: isPassOK() == false  → only PASS and QUIT allowed
+    Phase 1: isRegistered() == false → only NICK, USER, QUIT allowed
+    Phase 2: registered → dispatch map
+
+Phase 0 gate prevents the infinite-loop bug: any command that isn't PASS
+returns 451 ERR_NOTREGISTERED. The client can't spam commands without
+first authenticating.
+
+handlePass() disconnects immediately on wrong password, so the client
+cannot retry.
+
+
+------------------------------------------------------------------------
+8. THE STATIC DISPATCH MAP
+------------------------------------------------------------------------
+
+    static std::map<std::string, HandlerFunc> handlers;
+    static bool initialized = false;
+    if (!initialized)
+    {
+        handlers["JOIN"] = &handleJoin;
+        handlers["PING"] = &handlePing;
+        // ...
+        initialized = true;
+    }
+    handlers.find(cmd)->second(server, client, params);
+
+'static' means: allocated once for the lifetime of the program, not on
+the stack each call. The bool guard fills it only on the first call.
+
+HandlerFunc is a typedef for a function pointer:
+
+    typedef void (*HandlerFunc)(Server*, Client*, const std::vector<std::string>&);
+
+This is the C++98 way to store a callable. Instead of a long if/else if
+chain, you get O(log n) dispatch and adding a new command is just one
+extra handlers["CMD"] = &handleCmd line.
+
+
+------------------------------------------------------------------------
+9. CLIENT STATE MACHINE
+------------------------------------------------------------------------
+
+A Client object tracks exactly where in the handshake a connection is:
+
+  _passOK       Set after a correct PASS
+  _nickname     Set after a valid NICK
+  _username     Set after USER
+  _registered   Set when all three above are satisfied
+  _channels     List of Channel* the client is currently in
+  _recvBuffer   Accumulates partial reads from recv()
+  _sendBuffer   Queues outgoing data for POLLOUT flushing
+
+tryRegister() is the gate — it checks all three conditions and only
+calls sendWelcomeMessages() when all are met. This means NICK and USER
+can arrive in any order and it will still work correctly.
+
+
+------------------------------------------------------------------------
+10. REMOVE CLIENT: removeClient(fd, reason)
+------------------------------------------------------------------------
+
+Called from:
+  - handleQuit (user typed /quit)
+  - receivedMessage (recv returned 0 = clean disconnect)
+  - receivedMessage (recv returned -1 = read error)
+  - initServer poll loop (POLLHUP / POLLERR / POLLNVAL)
+
+What it does:
+  1. Builds ":prefix QUIT :reason"
+  2. Broadcasts it to all channels the client is in (via channel->broadcast)
+  3. Calls channel->removeClient on each (which updates client->_channels)
+  4. Deletes empty channels
+  5. close(fd)
+  6. delete client
+  7. _clients.erase
+  8. Removes from _pollfds
+
+The reason parameter has a default of "Connection closed", so all the
+non-QUIT paths don't need to pass one.
+
+
+------------------------------------------------------------------------
+11. CHANNEL BROADCAST
+------------------------------------------------------------------------
+
+Channel::broadcast(msg, client):
+  - client == NULL   → send to ALL members
+  - client != NULL   → send to all members EXCEPT that client
+
+This is used for:
+  - JOIN: broadcast to channel, then send NAMREPLY to the joining client
+  - PRIVMSG: broadcast to all except sender
+  - QUIT: broadcast to all except the quitting client (they're already gone)
+  - NICK change: deduplicated broadcast to unique members of shared channels
+
+
+------------------------------------------------------------------------
+12. WHAT'S LEFT (at time of writing)
+------------------------------------------------------------------------
+
+Person A (done):
+  [x] IRCConstants.hpp
+  [x] Utils.hpp/cpp
+  [x] Client.hpp/cpp (send buffer, trySend, sendReply, channel tracking)
+  [x] CommandHandler.hpp
+  [x] CommandHandler.cpp — parseCommand, handle, handlePass, handleNick,
+      handleUser, tryRegister, sendWelcomeMessages, handlePing, handleQuit
+  [x] Server.hpp/cpp — cleaned up, POLLOUT wired, removeClient broadcasts
+
+Person B (todo):
+  [ ] Channel.cpp — isInvited() bug fix (checks _operators not _invitedClients)
+  [ ] Channel — getModes(), removePassword(), removeUserLimit()
+  [ ] handleJoin  — passwords, invite-only, user limit, NAMREPLY
+  [ ] handlePrivmsg
+  [ ] handlePart
+  [ ] handleKick
+  [ ] handleInvite
+  [ ] handleTopic
+  [ ] handleMode  — walk modestring, +i -i +t -t +k -k +l -l +o -o
+
+Day 4 (both):
+  [ ] Edge cases: JOIN "a,b,c", MODE +l non-numeric, case-insensitive lookups
+  [ ] nc partial-data test (subject requirement)
+  [ ] valgrind clean
+  [ ] irssi full checklist
+  [ ] README.md
+
+================================================================================
