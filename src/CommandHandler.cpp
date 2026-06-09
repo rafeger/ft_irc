@@ -429,12 +429,92 @@ void CommandHandler::handleKick(Server* server, Client* client,
 
 void CommandHandler::handleInvite(Server* server, Client* client,
 	const std::vector<std::string>& params)
-{ (void)server; (void)client; (void)params; }
+{
+	if (params.size() < 2)
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, "INVITE: Not enough parameters");
+		return ;
+	}
+	std::string nickname = params[0];
+	std::string channelName = params[1];
+	Channel* channel = server->getChannel(channelName);
+	if (!channel)
+	{
+		client->sendReply(ERR_NOSUCHCHANNEL, channelName + " :No such channel");
+		return ;
+	}
+	if (!channel->hasClient(client))
+	{
+		client->sendReply(ERR_NOTONCHANNEL, channelName + " :You're not on that channel");
+		return ;
+	}
+	if (channel->isInviteOnly() && !channel->isOperator(client))
+	{
+		client->sendReply(ERR_CHANOPRIVSNEEDED, channelName + " :You're not channel operator");
+		return ;
+	}
+	Client* nick = server->getClientByNickname(nickname);
+	if (!nick)
+	{
+		client->sendReply(ERR_NOSUCHNICK, nickname + " :No such nick");
+		return ;
+	}
+	if (channel->hasClient(nick))
+	{
+		client->sendReply(ERR_USERONCHANNEL, nickname + " " + channelName + " :is already on channel");
+		return ;
+	}
+	channel->inviteClient(nick);
+	client->sendReply(RPL_INVITING, nickname + " " + channelName);
+	nick->sendMessage(":" + client->getPrefix() + " INVITE " + nickname + " " + channelName);
+}
 
 void CommandHandler::handleTopic(Server* server, Client* client,
 	const std::vector<std::string>& params)
-{ (void)server; (void)client; (void)params; }
+{
+	if (params.empty())
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, "TOPIC: Not enough parameters");
+		return ;
+	}
+	std::string channelName = params[0];
+	Channel* channel = server->getChannel(channelName);
+	if (!channel)
+	{
+		client->sendReply(ERR_NOSUCHCHANNEL, channelName + " :No such channel");
+		return ;
+	}
+	if (!channel->hasClient(client))
+	{
+		client->sendReply(ERR_NOTONCHANNEL, channelName + " :You're not on that channel");
+		return ;
+	}
+	if (params.size() == 1)
+	{
+		if (channel->getTopic().empty())
+			client->sendReply(RPL_NOTOPIC, channelName + " :No topic is set");
+		else
+			client->sendReply(RPL_TOPIC, channelName + " :" + channel->getTopic());
+		return ;
+	}
+}
 
 void CommandHandler::handleMode(Server* server, Client* client,
 	const std::vector<std::string>& params)
-{ (void)server; (void)client; (void)params; }
+{
+	if (params.empty())
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, "MODE: Not enough parameters");
+		return ;
+	}
+	std::string target = params[0];
+	if (!target.empty() && target[0] == '#')
+	{
+		Channel* channel = server->getChannel(target);
+		if (!channel)
+		{
+			client->sendReply(ERR_NOSUCHCHANNEL, target + " :No such channel");
+			return ;
+		}
+	}
+}
