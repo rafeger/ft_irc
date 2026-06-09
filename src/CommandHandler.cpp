@@ -261,19 +261,171 @@ void CommandHandler::handleQuit(Server* server, Client* client,
 
 void CommandHandler::handleJoin(Server* server, Client* client,
 	const std::vector<std::string>& params)
-{ (void)server; (void)client; (void)params; }
+{
+	if (params.empty())
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, "JOIN: Not enough parameters");
+		return ;
+	}
+	std::string channelName = params[0];
+	if (channelName.empty() || channelName[0] != '#')
+	{
+		client->sendReply(ERR_NOSUCHCHANNEL, channelName + " :No such channel");
+		return ;
+	}
+	Channel* channel = server->getChannel(channelName);
+	if (!channel)
+	{
+		server->createChannel(channelName);
+		channel = server->getChannel(channelName);
+	}
+	if (channel->hasClient(client))
+		return ;
+	if (channel->isInviteOnly() && !channel->isInvited(client))
+	{
+		client->sendReply(ERR_INVITEONLYCHAN, channelName + ":Cannot join channel (+i)");
+		return ;
+	}
+	std::string key;
+	if (params.size() > 1)
+		key = params[1];
+	if (!channel->checkPassword(key))
+	{
+		client->sendReply(ERR_BADCHANNELKEY, channelName + ":Cannot join channel (+k)");
+		return ;
+	}
+	if (channel->isFull())
+	{
+		client->sendReply(ERR_CHANNELISFULL, channelName + ":Cannot join channel (+l)");
+		return ;
+	}
+	channel->addClient(client);
+	client->joinChannel(channel);
+	if (channel->isInvited(client))
+		channel->removeInvite(client);
+	std::string join_msg = ":" + client->getPrefix() + " JOIN :" + channelName;
+	channel->broadcast(join_msg, NULL);
+	if (channel->getTopic().empty())
+		client->sendReply(RPL_NOTOPIC, channelName + ":No topic is set");
+	else
+		client->sendReply(RPL_TOPIC, channelName + ":" + channel->getTopic());
+}
 
 void CommandHandler::handlePart(Server* server, Client* client,
 	const std::vector<std::string>& params)
-{ (void)server; (void)client; (void)params; }
+{
+	if (params.empty())
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, "PART: Not enough parameters");
+		return ;
+	}
+	std::string channelName = params[0];
+	Channel* channel = server->getChannel(channelName);
+	if (!channel)
+	{
+		client->sendReply(ERR_NOSUCHCHANNEL, channelName + ":No such channel");
+		return ;
+	}
+	if (!channel->hasClient(client))
+	{
+		client->sendReply(ERR_NOTONCHANNEL, channelName + ":You're not on that channel");
+		return ;
+	}
+	std::string part_msg = ":" + client->getPrefix() + " PART :" + channelName;
+	if (params.size() > 1 && !params[1].empty())
+		part_msg += " :" + params[1];
+	channel->broadcast(part_msg, NULL);
+	channel->removeClient(client);
+	client->leaveChannel(channel);
+	if (channel->isEmpty())
+		server->removeChannel(channelName);
+}
 
 void CommandHandler::handlePrivmsg(Server* server, Client* client,
 	const std::vector<std::string>& params)
-{ (void)server; (void)client; (void)params; }
+{
+	if (params.size() < 2)
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, "PRIVMSG: Not enough parameters");
+		return ;
+	}
+	std::string target = params[0];
+	std::string text = params[1];
+	if (text.empty())
+		return ;
+	std::string priv_msg = ":" + client->getPrefix() + " PRIVMSG " + target + " :" + text;
+	if (!target.empty() && target[0] == '#')
+	{
+		Channel* channel = server->getChannel(target);
+		if (!channel)
+		{
+			client->sendReply(ERR_NOSUCHCHANNEL, target + " :No such channel");
+			return ;
+		}
+		if (!channel->hasClient(client))
+		{
+			client->sendReply(ERR_CANNOTSENDTOCHAN, target + " :Cannot send to channel");
+			return ;
+		}
+		channel->broadcast(priv_msg, client);
+		return ;
+	}
+	Client* dest = server->getClientByNickname(target);
+	if (!dest)
+	{
+		client->sendReply(ERR_NOSUCHNICK, target + " :No such nick");
+		return ;
+	}
+	dest->sendMessage(priv_msg);
+}
 
 void CommandHandler::handleKick(Server* server, Client* client,
 	const std::vector<std::string>& params)
-{ (void)server; (void)client; (void)params; }
+{
+	if (params.size() < 2)
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, "KICK: Not enough parameters");
+		return ;
+	}
+	std::string channelName = params[0];
+	std::string username = params[1];
+	Channel* channel = server->getChannel(channelName);
+	if (!channel)
+	{
+		client->sendReply(ERR_NOSUCHCHANNEL, channelName + " :No such channel");
+		return ;
+	}
+	if (!channel->hasClient(client))
+	{
+		client->sendReply(ERR_NOTONCHANNEL, channelName + " :You're not on that channel");
+		return ;
+	}
+	if (!channel->isOperator(client))
+	{
+		client->sendReply(ERR_CHANOPRIVSNEEDED, channelName + " :You're not channel operator");
+		return ;
+	}
+	Client* nick = server->getClientByNickname(username);
+	if (!nick)
+	{
+		client->sendReply(ERR_NOSUCHNICK, username + " :No such nick");
+		return ;
+	}
+	if (!channel->hasClient(nick))
+	{
+		client->sendReply(ERR_USERNOTINCHANNEL, username + " " + channelName + " :They aren't on that channel");
+		return ;
+	}
+	std::string comment = "";
+	if (params.size() > 2)
+		std::string comment = params[2];
+	std::string kick_msg = ":" + client->getPrefix() + " KICK " + channelName + " " + username + " :" + comment;
+	channel->broadcast(kick_msg, NULL);
+	channel->removeClient(client);
+	client->leaveChannel(channel);
+	if (channel->isEmpty())
+		server->removeChannel(channelName);
+}
 
 void CommandHandler::handleInvite(Server* server, Client* client,
 	const std::vector<std::string>& params)
