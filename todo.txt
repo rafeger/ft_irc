@@ -44,28 +44,28 @@ DAY 1-A  CommandHandler — skeleton + auth
 ─────────────────────────────────────────
 
 CommandHandler.hpp (new file)
-  [ ] Forward declare Server, Client
-  [ ] One public entry point: static void handle(Server*, Client*, const std::string& line)
-  [ ] Declare all handler free-functions as private static members
+  [x] Forward declare Server, Client
+  [x] One public entry point: static void handle(Server*, Client*, const std::string& line)
+  [x] Declare all handler free-functions as private static members
       (declare ALL of them, even the ones Person B implements — so .hpp is complete upfront)
 
 CommandHandler.cpp — TOP SECTION (Person A)
-  [ ] parseCommand(line) — tokenize, handle trailing ':' param correctly
-  [ ] handle() — dispatch map initialized once with static bool guard:
+  [x] parseCommand(line) — tokenize, handle trailing ':' param correctly
+  [x] handle() — dispatch map initialized once with static bool guard:
         typedef void (*HandlerFunc)(Server*, Client*, const std::vector<std::string>&);
         static std::map<std::string, HandlerFunc> handlers;
         static bool initialized = false;
         if (!initialized) { populate all entries; initialized = true; }
       Registration guard: reject unregistered clients except PASS/NICK/USER/CAP/PONG/QUIT
       Dispatch: map.find(cmd) → call handler; else sendReply 421 unknown command
-  [ ] handlePass()  — check password, setPassOK(); disconnect + ERR_PASSWDMISMATCH on failure
-  [ ] handleNick()  — Utils::isValidNickname(), uniqueness check,
+  [x] handlePass()  — check password, setPassOK(); disconnect + ERR_PASSWDMISMATCH on failure
+  [x] handleNick()  — Utils::isValidNickname(), uniqueness check,
                       if already registered broadcast ":old!u@h NICK :new" to shared channels
-  [ ] handleUser()  — parse all 4 fields: USER <user> <host> <server> :<realname>
+  [x] handleUser()  — parse all 4 fields: USER <user> <host> <server> :<realname>
                       setUsername(), setRealname(); call tryRegister()
-  [ ] tryRegister() — if passOK + hasNick + hasUser + not yet registered → register + welcome
-  [ ] sendWelcomeMessages() — 001, 002, 003, 004 in order
-  [ ] handlePing()  — sendMessage("PONG localhost :" + params[0])
+  [x] tryRegister() — if passOK + hasNick + hasUser + not yet registered → register + welcome
+  [x] sendWelcomeMessages() — 001, 002, 003, 004 in order
+  [x] handlePing()  — sendMessage("PONG localhost :" + params[0])
   [x] handleQuit()  — broadcast QUIT to client's channels, then server->removeClient()
 
 TEST GOAL — end of Day 1:

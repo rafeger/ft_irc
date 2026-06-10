@@ -47,11 +47,13 @@ void Channel::removeClient(Client* client)
 		_operators.insert(_clients.front());
 }
 
+//checks if a client is in _client
 bool Channel::hasClient(Client* client) const
 {
 	return (std::find(_clients.begin(), _clients.end(), client) != _clients.end());
 }
 
+//maks a client in a channel an operator
 void Channel::addOperator(Client *client)
 {
 	if (!client || !hasClient(client))
@@ -59,6 +61,7 @@ void Channel::addOperator(Client *client)
 	_operators.insert(client);
 }
 
+//remove op rights to a client in a channel
 void Channel::removeOperator(Client *client)
 {
 	if (!client)
@@ -68,6 +71,7 @@ void Channel::removeOperator(Client *client)
 		_operators.insert(_clients.front());
 }
 
+//check if operator
 bool Channel::isOperator(Client *client) const
 {
 	return (_operators.find(client) != _operators.end());
