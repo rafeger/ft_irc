@@ -3,6 +3,10 @@
 #include <sys/socket.h>
 #include <algorithm>
 
+
+//la maniere dont on a gere les operateurs ou pas, le premier a rejoindre un channel 
+//est mod, les suivants ne le sont pas.
+
 Client::Client() : _fd(-1), _hostname(""), _passOK(false), _registered(false)
 {}
 

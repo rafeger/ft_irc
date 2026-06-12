@@ -102,7 +102,7 @@ void Server::removeClient(int fd, const std::string& reason)
 	Client* client = it->second;
 
 	std::string quitMsg = ":" + client->getPrefix() + " QUIT :" + reason;
-	std::vector<Channel*> clientChans = client->getChannels(); // copy — removeClient modifies original
+	std::vector<Channel*> clientChans = client->getChannels();
 	for (size_t i = 0; i < clientChans.size(); ++i)
 	{
 		clientChans[i]->broadcast(quitMsg, client);
@@ -114,7 +114,7 @@ void Server::removeClient(int fd, const std::string& reason)
 		}
 	}
 
-	// RFC 1459: server sends ERROR before closing — irssi waits for this
+	client->trySend();
 	std::string errMsg = ":localhost ERROR :Closing Link: " + client->getPrefix() + " (" + reason + ")\r\n";
 	send(fd, errMsg.c_str(), errMsg.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
 
@@ -200,7 +200,11 @@ void Server::initServer(const std::string& port, const std::string& password)
 				if (isServerFd)
 					acceptClient();
 				else
+				{
 					receivedMessage(fd);
+					if (_clients.find(fd) == _clients.end())
+						continue;
+				}
 			}
 
 			// Error / hangup — only after we have drained the read buffer

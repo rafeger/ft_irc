@@ -129,7 +129,6 @@ void CommandHandler::handlePass(Server* server, Client* client,
 	if (params[0] != server->getPassword())
 	{
 		client->sendReply(ERR_PASSWDMISMATCH, ":Password incorrect");
-		// Disconnect immediately — prevents the infinite retry loop
 		server->removeClient(client->getFd(), "Bad password");
 		return;
 	}
@@ -369,6 +368,7 @@ void CommandHandler::handlePrivmsg(Server* server, Client* client,
 	dest->sendMessage(priv_msg);
 }
 
+//tested all ifs [x] DONE
 void CommandHandler::handleKick(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
@@ -408,11 +408,11 @@ void CommandHandler::handleKick(Server* server, Client* client,
 	}
 	std::string comment = "";
 	if (params.size() > 2)
-		std::string comment = params[2];
-	std::string kick_msg = ":" + client->getPrefix() + " KICK " + channelName + " " + username + " :" + comment;
+		comment = params[2];
+	std::string kick_msg = ":" + client->getPrefix() + " KICK " + channelName + " " + username + " : " + comment;
 	channel->broadcast(kick_msg, NULL);
-	channel->removeClient(client);
-	client->leaveChannel(channel);
+	channel->removeClient(nick);
+	nick->leaveChannel(channel);
 	if (channel->isEmpty())
 		server->removeChannel(channelName);
 }

@@ -634,13 +634,13 @@ When a client JOINs a channel:
 
 These are what the corrector will likely ask you to show live:
 
-  [ ] Connect with nc, complete registration, see 001-004
-  [ ] Wrong password → immediate disconnect + 464
-  [ ] Duplicate nickname → 433 error
-  [ ] QUIT → server logs disconnect, irssi window closes
-  [ ] Connect with irssi: irssi -c 127.0.0.1 -p 6667 -n nick -w password
-  [ ] JOIN a channel, PRIVMSG, PART
-  [ ] KICK a user (must be operator)
+  [x] Connect with nc, complete registration, see 001-004
+  [x] Wrong password → immediate disconnect + 464
+  [x] Duplicate nickname → 433 error
+  [x] QUIT → server logs disconnect, irssi window closes
+  [x] Connect with irssi: irssi -c 127.0.0.1 -p 6667 -n nick -w password
+  [x] JOIN a channel, PRIVMSG, PART
+  [x] KICK a user (must be operator)
   [ ] INVITE + invite-only channel
   [ ] TOPIC — view and set
   [ ] MODE — each of +i -i +t -t +k +l +o

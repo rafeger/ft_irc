@@ -4,3 +4,28 @@ Server.cpp:200	handleJoin() check pas le password
 Server.cpp:268	handleNick() double /r/n avec sendMessage()
 Server.cpp:331-354	handleCmd() PASS USER JOIN ok | NICK never dispatched
 Server.cpp:219	handleJoin() envoie 331 sans esspace avant :No topic is set
+
+
+
+
+new
+
+leaks
+
+usr/include/c++/15/bits/stl_vector.h:1263: std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::operator[](size_type) [with _Tp = pollfd; _Alloc = std::allocator<pollfd>; reference = pollfd&; size_type = long unsigned int]: Assertion '__n < this->size()' failed.
+==492603== 
+==492603== Process terminating with default action of signal 6 (SIGABRT): dumping core
+==492603==    at 0x4C77E7C: __pthread_kill_implementation (pthread_kill.c:44)
+==492603==    by 0x4C1DF0D: raise (raise.c:26)
+==492603==    by 0x4C056CF: abort (abort.c:77)
+==492603==    by 0x487D083: std::__glibcxx_assert_fail(char const*, int, char const*, char const*) (assert_fail.cc:41)
+==492603==    by 0x406182: std::vector<pollfd, std::allocator<pollfd> >::operator[](unsigned long) (in /home/rafeger/lvl5/ft_irc/ircserv)
+==492603==    by 0x4050EB: Server::initServer(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) (in /home/rafeger/lvl5/ft_irc/ircserv)
+==492603==    by 0x400A0C: main (in /home/rafeger/lvl5/ft_irc/ircserv)
+
+
+nc messages in chan not working
+
+test more with irssi
+
+admin power to users just joining, check proper administration of rights
