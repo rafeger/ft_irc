@@ -495,8 +495,13 @@ void CommandHandler::handleTopic(Server* server, Client* client,
 			client->sendReply(RPL_NOTOPIC, channelName + " :No topic is set");
 		else
 			client->sendReply(RPL_TOPIC, channelName + " :" + channel->getTopic());
-		return ;
 	}
+	else
+	{
+		channel->setTopic(params[1]);
+		client->sendReply(RPL_TOPIC, channelName + " :" + channel->getTopic());
+	}
+	return ;
 }
 
 void CommandHandler::handleMode(Server* server, Client* client,
@@ -508,13 +513,27 @@ void CommandHandler::handleMode(Server* server, Client* client,
 		return ;
 	}
 	std::string target = params[0];
-	if (!target.empty() && target[0] == '#')
+	if (target[0] != '#')
+		return ;
+
+	Channel* channel = server->getChannel(target);
+	if (!channel)
 	{
-		Channel* channel = server->getChannel(target);
-		if (!channel)
-		{
-			client->sendReply(ERR_NOSUCHCHANNEL, target + " :No such channel");
-			return ;
-		}
+		client->sendReply(ERR_NOSUCHCHANNEL, target + " :No such channel");
+		return ;
+	}
+	if (params.size() == 1)
+	{
+		std::string mode = "+";
+		if (channel->isInviteOnly())
+			mode += "i";
+		if (channel->isTopicRestricted())
+			mode += "t";
+		if (channel->hasPassword())
+			mode += "k";
+		if (channel->hasUserLimit())
+			mode += "l";
+		client->sendReply(RPL_CHANNELMODEIS, target + " " + mode);
+		return ;
 	}
 }
