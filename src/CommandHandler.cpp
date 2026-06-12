@@ -300,6 +300,10 @@ void CommandHandler::handleJoin(Server* server, Client* client,
 		client->sendReply(RPL_TOPIC, channelName + ":" + channel->getTopic());
 }
 
+//TALK ABOUT THIS DURING CORRECTION
+//irssi receives the message u send as part_msg and reads it
+//we had put a fkin : after PART. which made or whole irssi client bug.
+//i still dont rlly understand.
 void CommandHandler::handlePart(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
@@ -320,7 +324,7 @@ void CommandHandler::handlePart(Server* server, Client* client,
 		client->sendReply(ERR_NOTONCHANNEL, channelName + ":You're not on that channel");
 		return ;
 	}
-	std::string part_msg = ":" + client->getPrefix() + " PART :" + channelName;
+	std::string part_msg = ":" + client->getPrefix() + " PART " + channelName;
 	if (params.size() > 1 && !params[1].empty())
 		part_msg += " :" + params[1];
 	channel->broadcast(part_msg, NULL);
@@ -488,12 +492,20 @@ void CommandHandler::handleTopic(Server* server, Client* client,
 	}
 	else
 	{
+		if (channel->isTopicRestricted() && !channel->isOperator(client))
+		{
+			client->sendReply(ERR_CHANOPRIVSNEEDED, channelName + " :You're not channel operator");
+			return ;
+		}
 		channel->setTopic(params[1]);
-		client->sendReply(RPL_TOPIC, channelName + " :" + channel->getTopic());
+		std::string topicMsg = ":" + client->getPrefix() + " TOPIC " + channelName + " :" + params[1];
+		channel->broadcast(topicMsg, NULL);
 	}
-	return ;
 }
-
+//
+//case +i [x]
+//case -i [x]
+//case 
 void CommandHandler::handleMode(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
@@ -508,22 +520,98 @@ void CommandHandler::handleMode(Server* server, Client* client,
 
 	Channel* channel = server->getChannel(target);
 	if (!channel)
-	{
-		client->sendReply(ERR_NOSUCHCHANNEL, target + " :No such channel");
-		return ;
-	}
+		return (client->sendReply(ERR_NOSUCHCHANNEL, target + " :No such channel"));
 	if (params.size() == 1)
+		return (client->sendReply(RPL_CHANNELMODEIS, target + " " + channel->getModes()));
+	if (!channel->hasClient(client))
+		return (client->sendReply(ERR_NOTONCHANNEL, target + " :You're not on that channel"));
+	if (!channel->isOperator(client))
+		return (client->sendReply(ERR_CHANOPRIVSNEEDED, target + " :You're not channel operator"));
+
+	const std::string& modeStr = params[1];
+	size_t paramIdx = 2;
+	bool adding = true;
+	std::string appliedModes;
+	std::string appliedParams;
+	char lastSign = 0;
+
+	for (size_t i = 0; i < modeStr.size(); ++i)
 	{
-		std::string mode = "+";
-		if (channel->isInviteOnly())
-			mode += "i";
-		if (channel->isTopicRestricted())
-			mode += "t";
-		if (channel->hasPassword())
-			mode += "k";
-		if (channel->hasUserLimit())
-			mode += "l";
-		client->sendReply(RPL_CHANNELMODEIS, target + " " + mode);
-		return ;
+		char c = modeStr[i];
+		if (c == '+') { adding = true; continue; }
+		if (c == '-') { adding = false; continue; }
+
+		bool applied = false;
+		std::string modeParam;
+
+		switch (c)
+		{
+			case 'i':
+				channel->setInviteOnly(adding);
+				applied = true;
+				break ;
+			case 't':
+				channel->setTopicRestricted(adding);
+				applied = true;
+				break ;
+			case 'k':
+				if (adding)
+				{
+					if (paramIdx >= params.size()) continue;
+					modeParam = params[paramIdx++];
+					channel->setPassword(modeParam);
+				}
+				else
+					channel->removePassword();
+				applied = true;
+				break ;
+			case 'l':
+				if (adding)
+				{
+					if (paramIdx >= params.size()) continue;
+					const std::string& s = params[paramIdx++];
+					int n = std::atoi(s.c_str());
+					if (n <= 0) continue;
+					channel->setUserLimit((size_t)n);
+					modeParam = s;
+				}
+				else
+					channel->removeUserLimit();
+				applied = true;
+				break ;
+			case 'o':
+				if (paramIdx >= params.size()) continue;
+				{
+					const std::string& targetNick = params[paramIdx++];
+					Client* targetClient = server->getClientByNickname(targetNick);
+					if (!targetClient || !channel->hasClient(targetClient)) continue;
+					if (adding)
+						channel->addOperator(targetClient);
+					else
+						channel->removeOperator(targetClient);
+					modeParam = targetNick;
+				}
+				applied = true;
+				break ;
+			default:
+				break ;
+		}
+		if (applied)
+		{
+			char sign = adding ? '+' : '-';
+			if (sign != lastSign)
+			{
+				appliedModes += sign;
+				lastSign = sign;
+			}
+			appliedModes += c;
+			if (!modeParam.empty())
+				appliedParams += " " + modeParam;
+		}
+	}
+	if (!appliedModes.empty())
+	{
+		std::string modeMsg = ":" + client->getPrefix() + " MODE " + target + " " + appliedModes + appliedParams;
+		channel->broadcast(modeMsg, NULL);
 	}
 }

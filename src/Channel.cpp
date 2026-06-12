@@ -138,12 +138,13 @@ bool Channel::hasUserLimit() const
 	return (_hasUserLimit);
 }
 
+//i think this isnt even callled cuz channel limit not implemented
 void Channel::removeUserLimit()
 {
 	_userLimit = 0;
 	_hasUserLimit = false;
 }
-
+//simple getter for the modes of the chan
 std::string Channel::getModes() const
 {
 	std::string mode = "+";
