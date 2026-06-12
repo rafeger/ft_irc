@@ -2,8 +2,8 @@
 #include <cctype>
 #include <sstream>
 
-//
-
+//according to rfc 1459 (arbitrary/most widely used), max user nickname is 9 chars
+//this method ensures that it follows those regulations
 namespace Utils
 {
 	// RFC 1459: nick = letter *8( letter / digit / "-" / "_" ), max 9 chars
@@ -20,8 +20,6 @@ namespace Utils
 		}
 		return true;
 	}
-
-	// Splits "a,b,c" by ',' into {"a", "b", "c"}. Empty tokens are skipped.
 	std::vector<std::string>	split(const std::string& str, char delimiter)
 	{
 		std::vector<std::string>	tokens;

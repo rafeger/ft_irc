@@ -1,22 +1,26 @@
 #ifndef SERVER_HPP
-#define SERVER_HPP
+# define SERVER_HPP
 
-#include <iostream>
-#include <string>
-#include <cstring>
-#include <sstream>
-#include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <csignal>
-#include <map>
-#include <vector>
-#include <cerrno>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <poll.h>
+# include <iostream>
+# include <string>
+# include <cstring>
+# include <sstream>
+# include <stdlib.h>
+# include <unistd.h>
+# include <fcntl.h>
+# include <csignal>
+# include <map>
+# include <vector>
+# include <cerrno>
+# include <sys/socket.h>
+# include <netinet/in.h>
+# include <arpa/inet.h>
+# include <netdb.h>
+# include <poll.h>
+
+# define CYAN 	"\e[0;36m"
+# define DEFAULT "\x1b[0m"
+# define BOLDRED "\e[1;91m"
 
 class Client;
 class Channel;

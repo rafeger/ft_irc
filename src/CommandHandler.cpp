@@ -7,12 +7,10 @@
 #include <cctype>
 #include <set>
 
-// ================================================================
-// PERSON A — Connection lifecycle
-// ================================================================
-
 // Index-based parser — handles ":prefix CMD p1 p2 :trailing text"
 // We strip a leading ':' prefix (server-to-server) if present.
+
+//parser -> soccupe de suppr le :(qui permet de mettre des espaces)
 std::vector<std::string> CommandHandler::parseCommand(const std::string& line)
 {
 	std::vector<std::string> tokens;
@@ -86,7 +84,7 @@ void CommandHandler::handle(Server* server, Client* client, const std::string& l
 		return;
 	}
 
-	// Phase 2 — fully registered: use static dispatch map
+	//static dispatch map to call relative method
 	static std::map<std::string, HandlerFunc> handlers;
 	static bool initialized = false;
 	if (!initialized)
@@ -114,7 +112,6 @@ void CommandHandler::handle(Server* server, Client* client, const std::string& l
 		client->sendReply("421", cmd + " :Unknown command");
 }
 
-// ----------------------------------------------------------------
 
 void CommandHandler::handlePass(Server* server, Client* client,
 	const std::vector<std::string>& params)

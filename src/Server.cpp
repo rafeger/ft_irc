@@ -66,6 +66,7 @@ void Server::closeFd()
 	}
 }
 
+//lookup what is that
 void Server::acceptClient()
 {
 	Client* cl = new Client();
@@ -156,7 +157,6 @@ void Server::receivedMessage(int fd)
 	Client* client = it->second;
 	client->appendBuffer(buffer);
 
-	// Split on '\n' — strips trailing '\r' to handle both "\r\n" and bare "\n"
 	std::string& recvBuf = client->getBuffer();
 	size_t pos;
 	while ((pos = recvBuf.find('\n')) != std::string::npos)
@@ -166,12 +166,12 @@ void Server::receivedMessage(int fd)
 		if (!line.empty() && line[line.size() - 1] == '\r')
 			line.resize(line.size() - 1);
 		CommandHandler::handle(this, client, line);
-		// Client may have been removed inside the handler (QUIT, bad password)
 		if (_clients.find(fd) == _clients.end())
 			return;
 	}
 }
 
+//
 void Server::initServer(const std::string& port, const std::string& password)
 {
 	this->_port = atoi(port.c_str());
@@ -233,6 +233,7 @@ void Server::initServer(const std::string& port, const std::string& password)
 	}
 }
 
+//getter called in handle join method to provide a channel name or user
 Channel* Server::getChannel(const std::string& name)
 {
 	std::map<std::string, Channel*>::iterator it = _channels.find(name);
@@ -241,11 +242,13 @@ Channel* Server::getChannel(const std::string& name)
 	return NULL;
 }
 
+//is called when  uer creates a new chan by being the first to join it
 void Server::createChannel(const std::string& name)
 {
 	_channels[name] = new Channel(name);
 }
 
+//deletes a channel (is called automatically when chan is empty)
 void Server::removeChannel(const std::string& name)
 {
 	std::map<std::string, Channel*>::iterator it = _channels.find(name);

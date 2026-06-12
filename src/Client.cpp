@@ -9,7 +9,7 @@ Client::Client() : _fd(-1), _hostname(""), _passOK(false), _registered(false)
 Client::~Client()
 {}
 
-// --- Getters ---
+//getters
 
 int						Client::getFd()			const { return _fd; }
 const std::string&		Client::getHostname()	const { return _hostname; }
@@ -27,9 +27,13 @@ std::string Client::getPrefix() const
 	return _nickname + "!" + _username + "@" + _hostname;
 }
 
-// --- Setters ---
+//setters
 
-void	Client::setFd(int fd)							{ _fd = fd; }
+void	Client::setFd(int fd)
+{
+	_fd = fd;
+}
+
 void	Client::setHostname(const std::string& h)		{ _hostname = h; }
 void	Client::setNickname(const std::string& nick)	{ _nickname = nick; }
 void	Client::setUsername(const std::string& user)	{ _username = user; }
@@ -37,7 +41,7 @@ void	Client::setRealname(const std::string& real)	{ _realname = real; }
 void	Client::setPassOK(bool value)					{ _passOK = value; }
 void	Client::setRegistered(bool value)				{ _registered = value; }
 
-// --- State checks ---
+//state checkers
 
 bool	Client::isPassOK()		const { return _passOK; }
 bool	Client::isRegistered()	const { return _registered; }
@@ -50,7 +54,6 @@ bool	Client::isInChannel(Channel* channel) const
 	return std::find(_channels.begin(), _channels.end(), channel) != _channels.end();
 }
 
-// --- Buffering ---
 
 void	Client::appendBuffer(const std::string& data)
 {
