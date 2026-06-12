@@ -3,6 +3,12 @@
 #include "../include/Server.hpp"
 #include <algorithm>
 
+
+//plenty of helpers functions such as getters etc to access info without cluttering 
+//other methods
+
+//also has constructors and destructors for Channel class
+
 Channel::Channel(const std::string& name) : _name(name), _topic(""), 
 _inviteOnly(false), _topicRestricted(false), _password(""), 
 _hasPassword(false), _userLimit(0), _hasUserLimit(false)

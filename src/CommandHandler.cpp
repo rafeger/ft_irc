@@ -45,6 +45,8 @@ std::vector<std::string> CommandHandler::parseCommand(const std::string& line)
 	return tokens;
 }
 
+
+//recupere la commande utilise par lutilisateur et appelle la methode conrrespondante
 void CommandHandler::handle(Server* server, Client* client, const std::string& line)
 {
 	std::vector<std::string> tokens = parseCommand(line);
@@ -56,12 +58,9 @@ void CommandHandler::handle(Server* server, Client* client, const std::string& l
 		cmd[i] = static_cast<char>(std::toupper((unsigned char)cmd[i]));
 
 	std::vector<std::string> params(tokens.begin() + 1, tokens.end());
-
-	// Modern IRC clients send CAP negotiation before PASS — ignore silently
+	//why cap ?
 	if (cmd == "CAP" || cmd == "PONG")
 		return;
-
-	// Phase 0 — no PASS yet: only PASS and QUIT are accepted
 	if (!client->isPassOK())
 	{
 		if (cmd == "PASS")
@@ -72,8 +71,6 @@ void CommandHandler::handle(Server* server, Client* client, const std::string& l
 			client->sendReply(ERR_NOTREGISTERED, ":You have not registered");
 		return;
 	}
-
-	// Phase 1 — authenticated but NICK/USER not yet complete
 	if (!client->isRegistered())
 	{
 		if (cmd == "NICK")
@@ -255,10 +252,6 @@ void CommandHandler::handleQuit(Server* server, Client* client,
 	server->removeClient(client->getFd(), reason);
 }
 
-// ================================================================
-// PERSON B — Channel commands (stubs — to be filled in)
-// ================================================================
-
 void CommandHandler::handleJoin(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
@@ -270,7 +263,7 @@ void CommandHandler::handleJoin(Server* server, Client* client,
 	std::string channelName = params[0];
 	if (channelName.empty() || channelName[0] != '#')
 	{
-		client->sendReply(ERR_NOSUCHCHANNEL, channelName + " :No such channel");
+		client->sendReply(ERR_NOSUCHCHANNEL, channelName + " : No such channel");
 		return ;
 	}
 	Channel* channel = server->getChannel(channelName);
