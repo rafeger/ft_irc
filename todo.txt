@@ -91,7 +91,7 @@ Channel.hpp / Channel.cpp — additions needed for MODE (do this before handleMo
 ─────────────────────────────────────────
 DAY 2-B  Channel commands
 ─────────────────────────────────────────
-
+  
 CommandHandler.cpp — BOTTOM SECTION (Person B appends after Person A's section)
 
   handleJoin()
