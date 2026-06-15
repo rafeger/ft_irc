@@ -163,7 +163,6 @@ void CommandHandler::handleNick(Server* server, Client* client,
 
 	if (client->isRegistered())
 	{
-		// Notify the changing client + every unique member of their shared channels
 		std::string msg = ":" + oldPrefix + " NICK :" + newNick;
 		client->sendMessage(msg);
 
@@ -196,14 +195,12 @@ void CommandHandler::handleUser(Server* server, Client* client,
 		client->sendReply(ERR_ALREADYREGISTRED, ":You may not reregister");
 		return;
 	}
-	// USER <username> <hostname> <servername> :<realname>
 	if (params.size() < 4)
 	{
 		client->sendReply(ERR_NEEDMOREPARAMS, "USER :Not enough parameters");
 		return;
 	}
 	client->setUsername(params[0]);
-	// params[1] and [2] are hostname/servername — we ignore them (we use the real socket address)
 	client->setRealname(params[3]);
 	tryRegister(client);
 }
@@ -239,8 +236,6 @@ void CommandHandler::handlePing(Server* server, Client* client,
 	client->sendMessage("PONG localhost :" + params[0]);
 }
 
-// Hands the reason to removeClient — server broadcasts QUIT and cleans up.
-// Do NOT touch client after this call; the pointer is invalid.
 void CommandHandler::handleQuit(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {

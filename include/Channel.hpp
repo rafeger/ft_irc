@@ -28,21 +28,21 @@ class Channel
 		Channel(const std::string& name);
 		~Channel();
 
-		const std::string& getName() const;
-		const std::string& getTopic() const;
-		void setTopic(const std::string& topic);
-		void addClient(Client* client);
+		const std::string &getName() const;
+		const std::string &getTopic() const;
+		void setTopic(const std::string &topic);
+		void addClient(Client *client);
 		void removeClient(Client* client);
 		bool hasClient(Client* client) const;
-		void addOperator(Client* client);
+		void addOperator(Client *client);
 		void removeOperator(Client* client);
-		bool isOperator(Client* client) const;
+		bool isOperator(Client *client) const;
 		void setInviteOnly(bool value);
 		bool isInviteOnly() const;
 		void setTopicRestricted(bool value);
 		bool isTopicRestricted() const;
-		void setPassword(const std::string& password);
-		bool checkPassword(const std::string& password) const;
+		void setPassword(const std::string &password);
+		bool checkPassword(const std::string &password) const;
 		bool hasPassword() const;
 		void removePassword();
 		void setUserLimit(size_t limit);
@@ -51,11 +51,11 @@ class Channel
 		std::string getModes() const;
 		bool isFull() const;
 		bool isEmpty() const;
-		void inviteClient(Client* client);
-		bool isInvited(Client* client) const;
-		void removeInvite(Client* client);
-		void broadcast(const std::string& msg, Client* client);
-		const std::vector<Client*>& getClients() const;
+		void inviteClient(Client *client);
+		bool isInvited(Client *client) const;
+		void removeInvite(Client *client);
+		void broadcast(const std::string& msg, Client *client);
+		const std::vector<Client*> &getClients() const;
 		size_t getUserLimit() const;
 };
 

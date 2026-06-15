@@ -191,10 +191,6 @@ void Server::initServer(const std::string& port, const std::string& password)
 			bool isServerFd = (_pollfds[i].fd == _serverSocket);
 			int  fd         = _pollfds[i].fd;
 
-			// POLLIN first: read any pending data before acting on hangup.
-			// irssi sends QUIT then closes immediately, so both POLLIN and
-			// POLLHUP can be set in the same poll() — we must process the
-			// data first or the QUIT message is silently discarded.
 			if (_pollfds[i].revents & POLLIN)
 			{
 				if (isServerFd)
@@ -206,8 +202,6 @@ void Server::initServer(const std::string& port, const std::string& password)
 						continue;
 				}
 			}
-
-			// Error / hangup — only after we have drained the read buffer
 			if (_pollfds[i].revents & (POLLHUP | POLLERR | POLLNVAL))
 			{
 				if (!isServerFd && _clients.find(fd) != _clients.end())
@@ -217,15 +211,12 @@ void Server::initServer(const std::string& port, const std::string& password)
 
 			if (!isServerFd)
 			{
-				// receivedMessage may have removed this client (QUIT, bad password)
 				std::map<int, Client*>::iterator cit = _clients.find(fd);
 				if (cit == _clients.end())
 					continue;
 
 				if (_pollfds[i].revents & POLLOUT)
 					cit->second->trySend();
-
-				// Keep POLLOUT set only while there is data waiting to go out
 				if (cit->second->hasPendingData())
 					_pollfds[i].events |= POLLOUT;
 				else
