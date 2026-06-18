@@ -15,15 +15,45 @@ Client::~Client()
 
 //getters
 
-int						Client::getFd()			const { return _fd; }
-const std::string&		Client::getHostname()	const { return _hostname; }
-const std::string&		Client::getNickname()	const { return _nickname; }
-const std::string&		Client::getUsername()	const { return _username; }
-const std::string&		Client::getRealname()	const { return _realname; }
-std::string&			Client::getBuffer()			  { return _recvBuffer; }
-const std::string&		Client::getBuffer()		const { return _recvBuffer; }
+int	Client::getFd() const
+{
+	return _fd;
+}
 
-const std::vector<Channel*>& Client::getChannels() const { return _channels; }
+const std::string	&Client::getHostname() const
+{
+	return _hostname;
+}
+
+const std::string	&Client::getNickname() const
+{
+	return _nickname;
+}
+
+const std::string	&Client::getUsername() const
+{
+	return _username;
+}
+
+const std::string	&Client::getRealname() const
+{
+	return _realname;
+}
+
+std::string	&Client::getBuffer()
+{
+	return _recvBuffer;
+}
+
+const std::string	&Client::getBuffer() const
+{
+	return _recvBuffer;
+}
+
+const std::vector<Channel*>	&Client::getChannels() const
+{
+	return _channels;
+}
 
 // nick!user@host — used as the sender prefix in all outgoing IRC messages
 std::string Client::getPrefix() const
@@ -38,20 +68,62 @@ void	Client::setFd(int fd)
 	_fd = fd;
 }
 
-void	Client::setHostname(const std::string& h)		{ _hostname = h; }
-void	Client::setNickname(const std::string& nick)	{ _nickname = nick; }
-void	Client::setUsername(const std::string& user)	{ _username = user; }
-void	Client::setRealname(const std::string& real)	{ _realname = real; }
-void	Client::setPassOK(bool value)					{ _passOK = value; }
-void	Client::setRegistered(bool value)				{ _registered = value; }
+void	Client::setHostname(const std::string& h)
+{
+	_hostname = h;
+}
+
+void	Client::setNickname(const std::string& nick)
+{
+	_nickname = nick;
+}
+
+void	Client::setUsername(const std::string& user)
+{
+	_username = user;
+}
+
+void	Client::setRealname(const std::string& real)
+{
+	_realname = real;
+}
+
+void	Client::setPassOK(bool value)
+{
+	_passOK = value;
+}
+
+void	Client::setRegistered(bool value)
+{
+	_registered = value;
+}
 
 //state checkers
 
-bool	Client::isPassOK()		const { return _passOK; }
-bool	Client::isRegistered()	const { return _registered; }
-bool	Client::hasNick()		const { return !_nickname.empty(); }
-bool	Client::hasUser()		const { return !_username.empty(); }
-bool	Client::hasPendingData() const { return !_sendBuffer.empty(); }
+bool	Client::isPassOK() const
+{
+	return _passOK;
+}
+
+bool	Client::isRegistered() const
+{
+	return _registered;
+}
+
+bool	Client::hasNick() const
+{
+	return !_nickname.empty();
+}
+
+bool	Client::hasUser() const
+{
+	return !_username.empty();
+}
+
+bool	Client::hasPendingData() const
+{
+	return !_sendBuffer.empty();
+}
 
 bool	Client::isInChannel(Channel* channel) const
 {
