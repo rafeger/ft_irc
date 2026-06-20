@@ -20,9 +20,7 @@ class Channel
 		bool _inviteOnly;
 		bool _topicRestricted;
 		std::string _password;
-		bool _hasPassword;
 		size_t _userLimit;
-		bool _hasUserLimit;
 
 	public:
 		Channel(const std::string& name);

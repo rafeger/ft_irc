@@ -10,8 +10,7 @@
 //also has constructors and destructors for Channel class
 
 Channel::Channel(const std::string& name) : _name(name), _topic(""), 
-_inviteOnly(false), _topicRestricted(false), _password(""), 
-_hasPassword(false), _userLimit(0), _hasUserLimit(false)
+_inviteOnly(false), _topicRestricted(false), _password(""), _userLimit(0)
 {}
 
 Channel::~Channel()
@@ -36,7 +35,7 @@ void Channel::addClient(Client* client)
 {
 	if (!client || hasClient(client))
 		return ;
-	if (_hasUserLimit && _clients.size() >= _userLimit)
+	if (_userLimit > 0 && _clients.size() >= _userLimit)
 		return ;
 	_clients.push_back(client);
 	if (_clients.size() == 1)
@@ -106,43 +105,38 @@ bool Channel::isTopicRestricted() const
 void Channel::setPassword(const std::string& password)
 {
 	_password = password;
-	_hasPassword = true;
 }
 
 bool Channel::checkPassword(const std::string& password) const
 {
-	if (!_hasPassword)
+	if (_password.empty())
 		return (true);
 	return (_password == password);
 }
 
 bool Channel::hasPassword() const
 {
-	return (_hasPassword);
+	return (!_password.empty());
 }
 
 void Channel::removePassword()
 {
 	_password.clear();
-	_hasPassword = false;
 }
 
 void Channel::setUserLimit(size_t limit)
 {
 	_userLimit = limit;
-	_hasUserLimit = true;
 }
 
 bool Channel::hasUserLimit() const
 {
-	return (_hasUserLimit);
+	return (_userLimit > 0);
 }
 
-//i think this isnt even callled cuz channel limit not implemented
 void Channel::removeUserLimit()
 {
 	_userLimit = 0;
-	_hasUserLimit = false;
 }
 //simple getter for the modes of the chan
 std::string Channel::getModes() const
@@ -154,12 +148,12 @@ std::string Channel::getModes() const
 		mode += "i";
 	if (_topicRestricted)
 		mode += "t";
-	if (_hasPassword)
+	if (!_password.empty())
 	{
 		mode += "k";
 		param += " " + _password;
 	}
-	if (_hasUserLimit)
+	if (_userLimit > 0)
 	{
 		mode += "l";
 		std::ostringstream oss;
@@ -173,7 +167,7 @@ std::string Channel::getModes() const
 
 bool Channel::isFull() const
 {
-	if (!_hasUserLimit)
+	if (_userLimit == 0)
 		return (false);
 	return (_clients.size() >= _userLimit);
 }

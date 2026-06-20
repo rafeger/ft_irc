@@ -56,7 +56,6 @@ void CommandHandler::handle(Server* server, Client* client, const std::string& l
 		cmd[i] = static_cast<char>(std::toupper((unsigned char)cmd[i]));
 
 	std::vector<std::string> params(tokens.begin() + 1, tokens.end());
-	//why cap ?
 	if (cmd == "CAP" || cmd == "PONG")
 		return;
 	if (!client->isPassOK())
@@ -112,6 +111,16 @@ void CommandHandler::handle(Server* server, Client* client, const std::string& l
 		client->sendReply("421", cmd + " :Unknown command");
 }
 
+bool CommandHandler::requireParams(Client* client, const std::vector<std::string>& params,
+	size_t min, const std::string& cmd)
+{
+	if (params.size() < min)
+	{
+		client->sendReply(ERR_NEEDMOREPARAMS, cmd + " :Not enough parameters");
+		return false;
+	}
+	return true;
+}
 
 void CommandHandler::handlePass(Server* server, Client* client,
 	const std::vector<std::string>& params)
@@ -121,11 +130,8 @@ void CommandHandler::handlePass(Server* server, Client* client,
 		client->sendReply(ERR_ALREADYREGISTRED, ":You may not reregister");
 		return;
 	}
-	if (params.empty())
-	{
-		client->sendReply(ERR_NEEDMOREPARAMS, "PASS :Not enough parameters");
+	if (!requireParams(client, params, 1, "PASS"))
 		return;
-	}
 	if (params[0] != server->getPassword())
 	{
 		client->sendReply(ERR_PASSWDMISMATCH, ":Password incorrect");
@@ -138,11 +144,8 @@ void CommandHandler::handlePass(Server* server, Client* client,
 void CommandHandler::handleNick(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
-	if (params.empty())
-	{
-		client->sendReply("431", ":No nickname given");
+	if (!requireParams(client, params, 1, "NICK"))
 		return;
-	}
 	const std::string& newNick = params[0];
 
 	if (!Utils::isValidNickname(newNick))
@@ -195,11 +198,8 @@ void CommandHandler::handleUser(Server* server, Client* client,
 		client->sendReply(ERR_ALREADYREGISTRED, ":You may not reregister");
 		return;
 	}
-	if (params.size() < 4)
-	{
-		client->sendReply(ERR_NEEDMOREPARAMS, "USER :Not enough parameters");
+	if (!requireParams(client, params, 4, "USER"))
 		return;
-	}
 	client->setUsername(params[0]);
 	client->setRealname(params[3]);
 	tryRegister(client);
@@ -228,11 +228,8 @@ void CommandHandler::handlePing(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
 	(void)server;
-	if (params.empty())
-	{
-		client->sendReply(ERR_NEEDMOREPARAMS, "PING :Not enough parameters");
+	if (!requireParams(client, params, 1, "PING"))
 		return;
-	}
 	client->sendMessage("PONG localhost :" + params[0]);
 }
 
@@ -246,11 +243,8 @@ void CommandHandler::handleQuit(Server* server, Client* client,
 void CommandHandler::handleJoin(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
-	if (params.empty())
-	{
-		client->sendReply(ERR_NEEDMOREPARAMS, "JOIN: Not enough parameters");
+	if (!requireParams(client, params, 1, "JOIN"))
 		return ;
-	}
 	std::string channelName = params[0];
 	if (channelName.empty() || channelName[0] != '#')
 	{
@@ -302,11 +296,8 @@ void CommandHandler::handleJoin(Server* server, Client* client,
 void CommandHandler::handlePart(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
-	if (params.empty())
-	{
-		client->sendReply(ERR_NEEDMOREPARAMS, "PART: Not enough parameters");
+	if (!requireParams(client, params, 1, "PART"))
 		return ;
-	}
 	std::string channelName = params[0];
 	Channel* channel = server->getChannel(channelName);
 	if (!channel)
@@ -332,11 +323,8 @@ void CommandHandler::handlePart(Server* server, Client* client,
 void CommandHandler::handlePrivmsg(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
-	if (params.size() < 2)
-	{
-		client->sendReply(ERR_NEEDMOREPARAMS, "PRIVMSG: Not enough parameters");
+	if (!requireParams(client, params, 2, "PRIVMSG"))
 		return ;
-	}
 	std::string target = params[0];
 	std::string text = params[1];
 	if (text.empty())
@@ -371,11 +359,8 @@ void CommandHandler::handlePrivmsg(Server* server, Client* client,
 void CommandHandler::handleKick(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
-	if (params.size() < 2)
-	{
-		client->sendReply(ERR_NEEDMOREPARAMS, "KICK: Not enough parameters");
+	if (!requireParams(client, params, 2, "KICK"))
 		return ;
-	}
 	std::string channelName = params[0];
 	std::string username = params[1];
 	Channel* channel = server->getChannel(channelName);
@@ -419,11 +404,8 @@ void CommandHandler::handleKick(Server* server, Client* client,
 void CommandHandler::handleInvite(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
-	if (params.size() < 2)
-	{
-		client->sendReply(ERR_NEEDMOREPARAMS, "INVITE: Not enough parameters");
+	if (!requireParams(client, params, 2, "INVITE"))
 		return ;
-	}
 	std::string nickname = params[0];
 	std::string channelName = params[1];
 	Channel* channel = server->getChannel(channelName);
@@ -461,11 +443,8 @@ void CommandHandler::handleInvite(Server* server, Client* client,
 void CommandHandler::handleTopic(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
-	if (params.empty())
-	{
-		client->sendReply(ERR_NEEDMOREPARAMS, "TOPIC: Not enough parameters");
+	if (!requireParams(client, params, 1, "TOPIC"))
 		return ;
-	}
 	std::string channelName = params[0];
 	Channel* channel = server->getChannel(channelName);
 	if (!channel)
@@ -502,13 +481,10 @@ void CommandHandler::handleTopic(Server* server, Client* client,
 //case -i [x]
 //case 
 void CommandHandler::handleMode(Server* server, Client* client,
-	const std::vector<std::string>& params)
+	const std::vector<std::string> &params)
 {
-	if (params.empty())
-	{
-		client->sendReply(ERR_NEEDMOREPARAMS, "MODE: Not enough parameters");
+	if (!requireParams(client, params, 1, "MODE"))
 		return ;
-	}
 	std::string target = params[0];
 	if (target[0] != '#')
 		return ;

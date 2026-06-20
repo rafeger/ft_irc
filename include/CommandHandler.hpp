@@ -25,6 +25,7 @@ class CommandHandler
 		static std::vector<std::string>	parseCommand(const std::string& line);
 		static void						tryRegister(Client* client);
 		static void						sendWelcomeMessages(Client* client);
+		static bool						requireParams(Client* client, const std::vector<std::string>& params, size_t min, const std::string& cmd);
 
 		//connection
 		static void	handlePass(Server* server, Client* client, const std::vector<std::string>& params);

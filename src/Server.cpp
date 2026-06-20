@@ -217,13 +217,22 @@ void Server::initServer(const std::string& port, const std::string& password)
 
 				if (_pollfds[i].revents & POLLOUT)
 					cit->second->trySend();
-				if (cit->second->hasPendingData())
-					_pollfds[i].events |= POLLOUT;
-				else
-					_pollfds[i].events &= ~POLLOUT;
 			}
 
 			_pollfds[i].revents = 0;
+		}
+
+		for (size_t i = 0; i < _pollfds.size(); ++i)
+		{
+			if (_pollfds[i].fd == _serverSocket)
+				continue;
+			std::map<int, Client*>::iterator cit = _clients.find(_pollfds[i].fd);
+			if (cit == _clients.end())
+				continue;
+			if (cit->second->hasPendingData())
+				_pollfds[i].events |= POLLOUT;
+			else
+				_pollfds[i].events &= ~POLLOUT;
 		}
 	}
 }

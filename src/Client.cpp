@@ -152,21 +152,23 @@ void	Client::sendReply(const std::string& code, const std::string& message)
 }
 
 // Flushes as much of _sendBuffer as the socket accepts right now (non-blocking)
-bool	Client::trySend()
+bool Client::trySend()
 {
-	if (_sendBuffer.empty())
-		return true;
+    if (_sendBuffer.empty())
+        return true;
 
-	#ifdef __APPLE__
-		ssize_t sent = send(_fd, _sendBuffer.c_str(), _sendBuffer.length(), MSG_DONTWAIT);
-	#else
-		ssize_t sent = send(_fd, _sendBuffer.c_str(), _sendBuffer.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
-	#endif
+    int sent = send(_fd, _sendBuffer.c_str(), _sendBuffer.length(), MSG_NOSIGNAL);
 
-	if (sent > 0)
-		_sendBuffer.erase(0, sent);
-	return _sendBuffer.empty();
+    if (sent <= 0)
+        return false;
+
+    _sendBuffer.erase(0, sent);
+
+    if (_sendBuffer.empty())
+        return true;
+    return false;
 }
+
 
 // --- Channel membership tracking ---
 
