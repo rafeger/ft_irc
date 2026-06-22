@@ -6,8 +6,7 @@
 
 namespace Utils
 {
-	bool						isValidNickname(const std::string& nick);
-	std::vector<std::string>	split(const std::string& str, char delimiter);
+	bool	isValidNickname(const std::string& nick);
 }
 
 #endif

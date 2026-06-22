@@ -38,7 +38,7 @@ class Server
 
 	public:
 		Server();
-		virtual ~Server();
+		~Server();
 
 		void createServerSocket();
 		static void handleSignal(int signum);
@@ -47,7 +47,6 @@ class Server
 		void removeClient(int fd, const std::string& reason = "Connection closed");
 		void receivedMessage(int fd);
 		void initServer(const std::string& port, const std::string& password);
-		void run();
 		Channel* getChannel(const std::string& name);
 		void createChannel(const std::string& name);
 		void removeChannel(const std::string& name);

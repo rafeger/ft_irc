@@ -23,7 +23,6 @@
 # define RPL_MYINFO          "004"
 
 // --- Channel/user info replies ---
-# define RPL_UMODEIS         "221"
 # define RPL_CHANNELMODEIS   "324"
 # define RPL_NOTOPIC         "331"
 # define RPL_TOPIC           "332"

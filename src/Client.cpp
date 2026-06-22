@@ -35,11 +35,6 @@ const std::string	&Client::getUsername() const
 	return _username;
 }
 
-const std::string	&Client::getRealname() const
-{
-	return _realname;
-}
-
 std::string	&Client::getBuffer()
 {
 	return _recvBuffer;
@@ -81,11 +76,6 @@ void	Client::setNickname(const std::string& nick)
 void	Client::setUsername(const std::string& user)
 {
 	_username = user;
-}
-
-void	Client::setRealname(const std::string& real)
-{
-	_realname = real;
 }
 
 void	Client::setPassOK(bool value)

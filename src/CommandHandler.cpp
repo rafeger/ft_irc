@@ -201,7 +201,6 @@ void CommandHandler::handleUser(Server* server, Client* client,
 	if (!requireParams(client, params, 4, "USER"))
 		return;
 	client->setUsername(params[0]);
-	client->setRealname(params[3]);
 	tryRegister(client);
 }
 
@@ -287,6 +286,19 @@ void CommandHandler::handleJoin(Server* server, Client* client,
 		client->sendReply(RPL_NOTOPIC, channelName + ":No topic is set");
 	else
 		client->sendReply(RPL_TOPIC, channelName + ":" + channel->getTopic());
+
+	const std::vector<Client*>& members = channel->getClients();
+	std::string namesList;
+	for (size_t i = 0; i < members.size(); ++i)
+	{
+		if (i > 0)
+			namesList += " ";
+		if (channel->isOperator(members[i]))
+			namesList += "@";
+		namesList += members[i]->getNickname();
+	}
+	client->sendReply(RPL_NAMREPLY, "= " + channelName + " :" + namesList);
+	client->sendReply(RPL_ENDOFNAMES, channelName + " :End of /NAMES list");
 }
 
 //TALK ABOUT THIS DURING CORRECTION

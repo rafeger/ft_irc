@@ -66,7 +66,7 @@ void Server::closeFd()
 	}
 }
 
-//lookup what is that
+//
 void Server::acceptClient()
 {
 	Client* cl = new Client();
