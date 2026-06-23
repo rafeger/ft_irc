@@ -66,7 +66,9 @@ irssi
 - IRC numeric reply codes: https://www.alien.net.au/irc/irc2numerics.html
 - RFC 1459 (original IRC protocol): https://datatracker.ietf.org/doc/html/rfc1459
 - https://en.wikipedia.org/wiki/IRC 
-- 
+- https://modern.ircdocs.horse/
+- https://www.irchelp.org/clients/unix/ (choice of client)
+- and various ytb videos
 
 **irssi (IRC client used for testing)**
 - irssi documentation: https://irssi.org/

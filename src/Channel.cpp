@@ -42,12 +42,16 @@ void Channel::addClient(Client* client)
 		_operators.insert(client);
 }
 
+
+//on avait oublie de erase le client de invited client et dcp dans le cas TREEEEEES niche ou un client se reconnecte en utilisant le meme
+//adresse memoire cest la CATA
 void Channel::removeClient(Client* client)
 {
 	if (!client)
 		return ;
 	_clients.erase(std::remove(_clients.begin(), _clients.end(), client), _clients.end());
 	_operators.erase(client);
+	_invitedClients.erase(client);
 	if (_operators.empty() && !_clients.empty())
 		_operators.insert(_clients.front());
 }

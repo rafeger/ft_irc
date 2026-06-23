@@ -154,7 +154,7 @@ void CommandHandler::handleNick(Server* server, Client* client,
 		return;
 	}
 
-	Client* conflict = server->getClientByNickname(newNick);
+	Client *conflict = server->getClientByNickname(newNick);
 	if (conflict && conflict != client)
 	{
 		client->sendReply(ERR_NICKNAMEINUSE, newNick + " :Nickname is already in use");
@@ -303,8 +303,7 @@ void CommandHandler::handleJoin(Server* server, Client* client,
 
 //TALK ABOUT THIS DURING CORRECTION
 //irssi receives the message u send as part_msg and reads it
-//we had put a fkin : after PART. which made or whole irssi client bug.
-//i still dont rlly understand.
+//on avait mis un : apres Part en mode Part DEUX POINTS #general au lieu de juste PART #general et ca faisait tt bugger -> 2 jours dincomprehension
 void CommandHandler::handlePart(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
@@ -368,6 +367,7 @@ void CommandHandler::handlePrivmsg(Server* server, Client* client,
 }
 
 //tested all ifs [x] DONE
+//calls the suppression of channel with isEmpty
 void CommandHandler::handleKick(Server* server, Client* client,
 	const std::vector<std::string>& params)
 {
